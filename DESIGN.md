@@ -3,7 +3,7 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: design only. Nothing is built or tested yet.
+Status: design, plus a local prototype of the engine (see Engine). No client or server code yet.
 
 ## Model
 
@@ -24,6 +24,10 @@ Status: design only. Nothing is built or tested yet.
 - When another client has newer WIP or master moved, the client notifies. It never pulls by itself.
 - Change detection uses snapshots and parents, not mtime (clocks differ, git rewrites mtimes).
 - A WIP snapshot may catch a folder mid-save or mid-rebase. The next one corrects it; push at a quiet moment.
+- Ignore rules apply to restore as well as snapshot. A restore deletes what is not in the snapshot,
+  so an ignored directory would be wiped otherwise.
+- A snapshot is never changed after it is created. Its ID is its name.
+- No snapshot is made when nothing changed.
 
 ## Pull when both sides changed
 
@@ -39,23 +43,58 @@ Compared per file against the common base snapshot:
 
 ## Parts
 
-- **Server**: storage reached over ssh. No daemon if the engine allows it.
+- **Server**: storage reached over ssh, plus the same CLI run over ssh for what must be atomic: the
+  push check. No daemon; one can be added later if needed.
 - **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
-  CLI: `add`, `status`, `log`, `diff`, `push`, `pull`, `restore`.
+  CLI: `add`, `status`, `log`, `diff`, `push`, `pull`, `restore`. Written in Go, one binary for both
+  sides.
 - **Log**: what was sent and when, per folder.
 - **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, build output).
 - Later: waybar indicator, vicinae command.
 
 ## Engine
 
-Don't write the file transfer. Candidate: **restic** (atomic snapshots tagged by host, deduplication
-across clients, diff, restore, pruning, encrypted on the server, only needs ssh).
+Don't write the file transfer. **restic** does it: atomic snapshots per host, deduplication across
+clients, diff, restore, pruning, encrypted on the server, only needs ssh.
 
-To verify with a prototype on one real project:
+How wipsync uses it:
 
-1. Time for a snapshot of a large folder after a small change.
-2. Restore makes a folder exactly match a snapshot, including deletions.
-3. Where parent and master pointers live (restic tags, or a small file next to the repository).
+- Snapshot: `backup --host <client> --skip-if-unchanged`, with the folder's ignore rules.
+- Parent: restic records one per snapshot. After a pull, the next snapshot names the pulled one with
+  `--parent`, also when it is another client's.
+- Restore: `restore <id>:<folder> --delete`, with the same ignore rules. The folder's own mode and
+  mtime are not restored.
+- master: a file per folder next to the repository, holding a snapshot ID. Only the server command
+  writes it, under a lock: move it if it still equals the caller's base, otherwise reject.
+- Not tags: changing a tag gives the snapshot a new ID and leaves other snapshots' parents pointing
+  at the old one.
+- Not tree hashes for "same state": directory timestamps change them, including directories above
+  the folder.
+
+### Prototype (2026-10-12)
+
+restic 0.19.1, local disk, warm cache, single runs. One folder: 636 MiB in 3811 files; its `.venv`
+holds 3559 of them and nearly all the size.
+
+| Measured | Result |
+|---|---|
+| First snapshot | 4.4s, stored as 231M |
+| Snapshot, nothing changed | 0.84s, nothing uploaded |
+| Snapshot after a small change | 0.91s, 5 KB stored |
+| Snapshot without `.venv` | 0.68s |
+| Restore into an empty directory | 3.3s, identical |
+| Restore over a drifted folder | 2.2s, identical, `.git` included |
+| Restore of a snapshot without `.venv` | deletes the local `.venv` unless excluded on restore too |
+| Second client, same content | 1.9s, 3 KB added |
+| Two clients at once | both succeed, `restic check` clean |
+| 20 pushes racing on the master file | 1 accepted, 19 rejected, in 50 of 50 rounds |
+
+Still to verify:
+
+1. The same over ssh, with a cold cache, and on a much larger folder.
+2. Pruning while clients write (it takes an exclusive lock).
+3. Snapshots with relative paths, so directories above the folder stay out.
+4. Changing an ignore rule after snapshots exist.
 
 Fallback: rsync over ssh with hard-link snapshots on the server.
 
@@ -66,6 +105,6 @@ server is a manual one-time step.
 
 ## Open
 
-- Language for the client.
 - How many WIP snapshots to keep, and for how long.
 - Whether secrets in synced folders (`.env`) need more than the engine's encryption.
+- Whether the push check also verifies that the new snapshot exists and descends from the base.
