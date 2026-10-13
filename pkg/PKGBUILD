@@ -12,7 +12,7 @@ provides=(wipsync)
 conflicts=(wipsync)
 options=(!debug)
 source=("wipsync-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/wipsync-$pkgver-x86_64.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('37c3cf07c3da574e0970ddccdd42552c03f18819fad388a9de37350afd6b2cf9')
 
 package() {
   cd "wipsync-$pkgver-x86_64"
