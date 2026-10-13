@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/fingerprint"
 	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
 	"github.com/ahaltindis/wipsync/internal/state"
@@ -120,6 +121,12 @@ pull asks for its location once and remembers it.`,
 			}
 			if err := store.SetAfterPull(root, path, true); err != nil {
 				return err
+			}
+			// The folder as pulled is what later looks are compared with.
+			if print, err := fingerprint.Of(ctx, dir, f.Ignore); err == nil {
+				if err := store.SetFingerprint(root, path, print); err != nil {
+					return err
+				}
 			}
 			fmt.Fprintf(out, "pulled %s into %s: %s\n", f, dir, describe(target))
 			return nil

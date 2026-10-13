@@ -74,6 +74,17 @@ func (s *Store) SetMaster(root, path, id string) error {
 	return s.set(root, path, "master", id)
 }
 
+// Fingerprint returns the folder's fingerprint at its last snapshot or
+// pull, or "" if there is none.
+func (s *Store) Fingerprint(root, path string) (string, error) {
+	return s.get(root, path, "fingerprint")
+}
+
+// SetFingerprint records the folder's fingerprint.
+func (s *Store) SetFingerprint(root, path, print string) error {
+	return s.set(root, path, "fingerprint", print)
+}
+
 // AfterPull reports whether the folder was pulled and not snapshotted since.
 func (s *Store) AfterPull(root, path string) (bool, error) {
 	v, err := s.get(root, path, "pulled")

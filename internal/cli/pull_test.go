@@ -106,20 +106,24 @@ func TestPullOnNewClient(t *testing.T) {
 		t.Errorf("unexpected log:\n%s", out)
 	}
 
-	// The first snapshot after the pull is saved with the pulled one as
-	// its parent, and the one after that finds nothing to do.
-	b.must("", "snapshot", dirB)
+	// Nothing changed since the pull, so there is nothing to snapshot.
+	if out := b.must("", "snapshot", dirB); !strings.Contains(out, "no changes") {
+		t.Errorf("snapshot right after the pull: %s", out)
+	}
+	if n := len(a.snapshots(repo)); n != 1 {
+		t.Errorf("%d snapshots after an unchanged pull, want 1", n)
+	}
+
+	// Work on the second client is saved with the pulled snapshot as its
+	// parent, and goes back as master.
+	b.write("Projects/Freelance/app/main.py", "print(2222)\n")
+	if out := b.must("", "snapshot", dirB); !strings.Contains(out, "0 new, 1 changed") {
+		t.Errorf("snapshot after an edit: %s", out)
+	}
 	all := a.snapshots(repo)
 	if len(all) != 2 || all[1].Hostname != "client-b" || all[1].Parent != pulled {
 		t.Fatalf("snapshots = %+v", all)
 	}
-	if out := b.must("", "snapshot", dirB); !strings.Contains(out, "no changes") {
-		t.Errorf("second snapshot after the pull: %s", out)
-	}
-
-	// Work on the second client goes back as master.
-	b.write("Projects/Freelance/app/main.py", "print(2222)\n")
-	b.must("", "snapshot", dirB)
 	if out := b.must("", "push", dirB); !strings.Contains(out, "master is now ") || !strings.Contains(out, "by client-b") {
 		t.Errorf("unexpected push output: %s", out)
 	}

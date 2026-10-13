@@ -138,6 +138,82 @@ func TestSnapshot(t *testing.T) {
 	}
 }
 
+// An unchanged folder is recognised without restic, and git's own
+// housekeeping does not count as a change.
+func TestSnapshotUnchanged(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	e := newEnv(t)
+	repo := e.repo()
+	e.write("Projects/app/a.txt", "one\n")
+	dir := filepath.Join(e.home, "Projects/app")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-q", "-m", "first")
+	e.must("", "add", dir)
+	e.must("", "snapshot", dir)
+
+	// git status, as a shell prompt runs it, over and over.
+	for i := 0; i < 3; i++ {
+		git("status")
+		if out := e.must("", "snapshot", dir); out != "Projects/app: no changes\n" {
+			t.Errorf("after git status: %s", out)
+		}
+	}
+	// An index without its stat cache, as after a pull, refreshed by git.
+	git("read-tree", "HEAD")
+	git("status")
+	if out := e.must("", "snapshot", dir); out != "Projects/app: no changes\n" {
+		t.Errorf("after an index refresh: %s", out)
+	}
+	if n := len(e.snapshots(repo)); n != 1 {
+		t.Errorf("%d snapshots, want 1", n)
+	}
+
+	// The unchanged case does not need the repository at all.
+	c := e.config()
+	working := c.Repository
+	c.Repository = filepath.Join(e.home, "no-such-repository")
+	if err := c.Save(e.cfg); err != nil {
+		t.Fatal(err)
+	}
+	if out := e.must("", "snapshot", dir); out != "Projects/app: no changes\n" {
+		t.Errorf("without a repository: %s", out)
+	}
+	c.Repository = working
+	if err := c.Save(e.cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// Real changes are still seen: a staged file, then a commit.
+	e.write("Projects/app/b.txt", "two\n")
+	git("add", "b.txt")
+	if out := e.must("", "snapshot", dir); !strings.Contains(out, "snapshot ") {
+		t.Errorf("after git add: %s", out)
+	}
+	git("commit", "-q", "-m", "second")
+	if out := e.must("", "snapshot", dir); !strings.Contains(out, "snapshot ") {
+		t.Errorf("after git commit: %s", out)
+	}
+	if out := e.must("", "snapshot", dir); out != "Projects/app: no changes\n" {
+		t.Errorf("after the last snapshot: %s", out)
+	}
+	if n := len(e.snapshots(repo)); n != 3 {
+		t.Errorf("%d snapshots, want 3", n)
+	}
+}
+
 func TestSnapshotErrors(t *testing.T) {
 	e := newEnv(t)
 	dir := e.mkdir("Projects/app")

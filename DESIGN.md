@@ -35,7 +35,8 @@ are not built yet.
 - Ignore rules apply to restore as well as snapshot. A restore deletes what is not in the snapshot,
   so an ignored directory would be wiped otherwise.
 - A snapshot is never changed after it is created. Its ID is its name.
-- No snapshot is made when nothing changed.
+- No snapshot is made when nothing changed. wipsync decides that itself, from a fingerprint of the
+  folder, before it calls the engine.
 
 ## Pull when both sides changed
 
@@ -61,7 +62,8 @@ Compared per file against the common base snapshot:
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to
   restic as is.
-- **State**: `~/.local/state/wipsync/` holds, per folder, the snapshot it is based on. Not inside the
+- **State**: `~/.local/state/wipsync/` holds, per folder, the snapshot it is based on, the master it
+  last saw, and its fingerprint. Not inside the
   folder, where a pull would overwrite it.
 - **Log**: what was sent and when, per folder.
 - **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, `__pycache__`).
@@ -87,7 +89,11 @@ How wipsync uses it:
 - Restore: `restore <id> --target <folder> --delete`, with the same ignore rules. The folder's own
   mode and mtime are not restored.
 - After a pull every file has a new ctime and inode. The next snapshot passes `--ignore-ctime
-  --ignore-inode` so files are not reread; it is still saved, with unchanged content.
+  --ignore-inode` so files are not reread.
+- Fingerprint: every file's path, size, mode and timestamps, kept in the client's state. An
+  unchanged fingerprint means no restic call. It leaves out what would make restic save a snapshot
+  with nothing in it: directory timestamps, which every `git status` moves, and the stat cache in
+  `.git/index`, which git rewrites after a pull. The index counts by what is staged in it.
 - master: a file per folder holding a snapshot ID, in `<repository>.wipsync/` beside the
   repository. Only the push script writes it, under a lock: move it if it still equals what the
   caller expects, otherwise reject. The client checks that the snapshot exists; the script does not.
