@@ -73,3 +73,21 @@ func (s *Store) Master(root, path string) (string, error) {
 func (s *Store) SetMaster(root, path, id string) error {
 	return s.set(root, path, "master", id)
 }
+
+// AfterPull reports whether the folder was pulled and not snapshotted since.
+func (s *Store) AfterPull(root, path string) (bool, error) {
+	v, err := s.get(root, path, "pulled")
+	return v != "", err
+}
+
+// SetAfterPull records or clears that mark.
+func (s *Store) SetAfterPull(root, path string, pulled bool) error {
+	if pulled {
+		return s.set(root, path, "pulled", "yes")
+	}
+	err := os.Remove(s.file(root, path, "pulled"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}

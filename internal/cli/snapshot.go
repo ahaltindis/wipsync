@@ -48,14 +48,23 @@ directory or as "Root/path". Nothing is saved when nothing changed.`,
 				return err
 			}
 
+			afterPull, err := store.AfterPull(f.Root, f.Path)
+			if err != nil {
+				return err
+			}
+
 			res, err := client.Backup(ctx, restic.BackupOptions{
-				Dir:      cfg.Dir(f),
-				Host:     cfg.Client,
-				Tags:     folderTags(f),
-				Excludes: f.Ignore,
-				Parent:   base,
+				Dir:       cfg.Dir(f),
+				Host:      cfg.Client,
+				Tags:      folderTags(f),
+				Excludes:  f.Ignore,
+				Parent:    base,
+				AfterPull: afterPull,
 			})
 			if err != nil {
+				return err
+			}
+			if err := store.SetAfterPull(f.Root, f.Path, false); err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()

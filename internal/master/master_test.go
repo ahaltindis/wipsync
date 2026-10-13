@@ -94,6 +94,41 @@ func TestMove(t *testing.T) {
 	}
 }
 
+func TestAll(t *testing.T) {
+	repo := newRepo(t)
+	p := open(t, repo)
+	ctx := context.Background()
+	if all, err := p.All(ctx); err != nil || len(all) != 0 {
+		t.Errorf("empty store: %v, %v", all, err)
+	}
+	want := map[string]string{
+		"Projects/Freelance/app": id("a"),
+		"Projects/master":        id("b"), // a folder named like the pointer file
+		"My Docs/a b/c":          id("c"),
+	}
+	for folder, master := range want {
+		root, path, _ := strings.Cut(folder, "/")
+		if err := p.Move(ctx, root, path, "", master); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := p.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != len(want) {
+		t.Errorf("all = %v", all)
+	}
+	for folder, master := range want {
+		if all[folder] != master {
+			t.Errorf("%s: master = %q, want %q", folder, all[folder], master)
+		}
+	}
+	if _, err := open(t, repo+"-missing").All(ctx); err == nil {
+		t.Error("All succeeded without a repository")
+	}
+}
+
 func TestRejectsBadInput(t *testing.T) {
 	repo := newRepo(t)
 	p := open(t, repo)
@@ -269,6 +304,9 @@ func TestOverSSH(t *testing.T) {
 			}
 			if got, err := p.Master(ctx, root, path); err != nil || got != id("b") {
 				t.Errorf("master = %q, %v", got, err)
+			}
+			if all, err := p.All(ctx); err != nil || len(all) != 1 || all[root+"/"+path] != id("b") {
+				t.Errorf("all = %v, %v", all, err)
 			}
 			// The same pointer, read without ssh.
 			if got, _ := open(t, repo).Master(ctx, root, path); got != id("b") {

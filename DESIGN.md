@@ -3,8 +3,9 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: `init`, `add`, `snapshot`, `push`, `log` and `doctor` work. Pull, the background service and
-packaging are not built yet.
+Status: `init`, `add`, `list`, `snapshot`, `push`, `log` and `doctor` work. `pull` fetches a folder
+that is not on the client yet; pulling into an existing folder, the background service and packaging
+are not built yet.
 
 ## Model
 
@@ -19,7 +20,9 @@ packaging are not built yet.
 - **master**: a pointer to one snapshot per folder, moved by a manual **push**. It marks a known good
   state. A push takes no snapshot and uploads nothing: it points master at the snapshot the client
   last took, so changes made since then are not part of it.
-- **pull**: manual. Takes master or another client's latest WIP into the local folder.
+- **pull**: manual. Takes master or another client's latest WIP into the local folder. On a client
+  that does not have the folder yet, pull asks where its root is, creates the folder, and adopts the
+  ignore rules its snapshot was taken with.
 
 ## Rules
 
@@ -53,7 +56,7 @@ Compared per file against the common base snapshot:
   and `flock`, and neither restic nor the repository password. No daemon; a server-side command
   can be added later if needed. Only ssh and local-disk repositories are supported.
 - **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
-  CLI: `init`, `add`, `snapshot`, `status`, `log`, `diff`, `push`, `pull`, `restore`, and `doctor`
+  CLI: `init`, `add`, `list`, `snapshot`, `log`, `diff`, `push`, `pull`, `restore`, and `doctor`
   to check the setup. Written in Go with cobra.
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to

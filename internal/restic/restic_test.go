@@ -168,3 +168,69 @@ func TestBackupErrors(t *testing.T) {
 		t.Errorf("wrong password: err = %v, want ErrWrongPassword", err)
 	}
 }
+
+func TestRestore(t *testing.T) {
+	c := newRepo(t)
+	ctx := context.Background()
+	src := t.TempDir()
+	write(t, filepath.Join(src, "a.txt"), "one")
+	write(t, filepath.Join(src, "sub", "b.txt"), "two")
+	write(t, filepath.Join(src, ".venv", "big"), "not synced")
+	snap, err := c.Backup(ctx, BackupOptions{Dir: src, Host: "client-a", Excludes: []string{".venv"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Into a fresh directory, which keeps the mode it was created with.
+	dst := filepath.Join(t.TempDir(), "copy")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Restore(ctx, RestoreOptions{ID: snap.SnapshotID, Dir: dst, Excludes: []string{".venv"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Restored == 0 || res.Deleted != 0 {
+		t.Errorf("result = %+v", res)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dst, "sub", "b.txt")); string(data) != "two" {
+		t.Errorf("sub/b.txt = %q", data)
+	}
+	if info, _ := os.Stat(dst); info.Mode().Perm() != 0o755 {
+		t.Errorf("folder mode = %o, want 755", info.Mode().Perm())
+	}
+
+	// Over a folder that drifted: extras go, changes revert, and an
+	// excluded directory is left alone.
+	write(t, filepath.Join(dst, "extra.txt"), "x")
+	write(t, filepath.Join(dst, "a.txt"), "changed")
+	write(t, filepath.Join(dst, ".venv", "local"), "keep me")
+	if err := os.Remove(filepath.Join(dst, "sub", "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	res, err = c.Restore(ctx, RestoreOptions{ID: snap.SnapshotID, Dir: dst, Excludes: []string{".venv"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted != 1 {
+		t.Errorf("deleted %d, want 1", res.Deleted)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "extra.txt")); err == nil {
+		t.Error("extra.txt survived")
+	}
+	if data, _ := os.ReadFile(filepath.Join(dst, "a.txt")); string(data) != "one" {
+		t.Errorf("a.txt = %q", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dst, "sub", "b.txt")); string(data) != "two" {
+		t.Errorf("sub/b.txt = %q", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dst, ".venv", "local")); string(data) != "keep me" {
+		t.Errorf("the excluded directory was touched: %q", data)
+	}
+
+	// The snapshot carries the rules it was taken with.
+	found, err := c.Find(ctx, snap.SnapshotID)
+	if err != nil || len(found.Excludes) != 1 || found.Excludes[0] != ".venv" {
+		t.Errorf("found = %+v, %v", found, err)
+	}
+}

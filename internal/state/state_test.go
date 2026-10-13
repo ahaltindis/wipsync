@@ -39,6 +39,28 @@ func TestBase(t *testing.T) {
 	}
 }
 
+func TestAfterPull(t *testing.T) {
+	s := &Store{Dir: filepath.Join(t.TempDir(), "wipsync")}
+	if got, err := s.AfterPull("Projects", "app"); err != nil || got {
+		t.Errorf("unset mark = %v, %v", got, err)
+	}
+	if err := s.SetAfterPull("Projects", "app", false); err != nil {
+		t.Errorf("clearing an unset mark: %v", err)
+	}
+	if err := s.SetAfterPull("Projects", "app", true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.AfterPull("Projects", "app"); !got {
+		t.Error("mark was not set")
+	}
+	if err := s.SetAfterPull("Projects", "app", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.AfterPull("Projects", "app"); got {
+		t.Error("mark was not cleared")
+	}
+}
+
 func TestDefault(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "/x/state")
 	if s, err := Default(); err != nil || s.Dir != "/x/state/wipsync" {

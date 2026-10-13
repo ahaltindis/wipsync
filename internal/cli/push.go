@@ -73,8 +73,7 @@ saw it. If another client pushed in between, pull first.`,
 			} else if err != nil {
 				return err
 			}
-			what := fmt.Sprintf("%s, the snapshot from %s (%s) by %s",
-				base[:8], snap.Time.Local().Format("2006-01-02 15:04"), age(time.Since(snap.Time)), snap.Host)
+			what := describe(snap)
 
 			out := cmd.OutOrStdout()
 			err = pointers.Move(ctx, f.Root, f.Path, expect, base)

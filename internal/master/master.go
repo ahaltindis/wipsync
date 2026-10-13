@@ -25,6 +25,9 @@ type Pointers interface {
 	// *MovedError. Of several callers moving from the same expect at once,
 	// one succeeds.
 	Move(ctx context.Context, root, path, expect, id string) error
+	// All returns the master of every folder that has one, keyed by the
+	// folder as "Root/path".
+	All(ctx context.Context) (map[string]string, error)
 	// Check reports whether the pointers can be reached and moved.
 	Check(ctx context.Context) error
 }
@@ -257,6 +260,27 @@ func (p *pointers) Move(ctx context.Context, root, path, expect, id string) erro
 		return fmt.Errorf("%s: unexpected reply %q", p.where, reply)
 	}
 	return nil
+}
+
+func (p *pointers) All(ctx context.Context) (map[string]string, error) {
+	reply, _, err := p.script(ctx, scriptAll)
+	if err != nil {
+		return nil, err
+	}
+	all := map[string]string{}
+	for _, line := range strings.Split(reply, "\n") {
+		if line == "" {
+			continue
+		}
+		// "<id> ./<root>/<path>/master"
+		id, file, ok := strings.Cut(line, " ")
+		folder, isPointer := strings.CutSuffix(strings.TrimPrefix(file, "./"), "/master")
+		if !ok || !isPointer || !validID(id) {
+			return nil, fmt.Errorf("%s: unexpected reply %q", p.where, line)
+		}
+		all[folder] = id
+	}
+	return all, nil
 }
 
 func (p *pointers) Check(ctx context.Context) error {

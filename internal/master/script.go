@@ -38,6 +38,16 @@ const scriptMaster = scriptHead + `
 if [ -f "$dir/master" ]; then cat "$dir/master"; else echo -; fi
 `
 
+// scriptAll prints every folder's master: a line with the snapshot ID and
+// the pointer file's path under the folders directory.
+const scriptAll = `
+if [ ! -d "$1" ]; then exit 4; fi
+cd "${1}.wipsync/folders" 2>/dev/null || exit 0
+find . -name master -type f | while IFS= read -r file; do
+	printf "%s %s\n" "$(cat "$file")" "$file"
+done
+`
+
 // scriptMove sets master to $5 if it is still $4. Otherwise it prints
 // "moved" and the current master, and exits with code 3. The lock makes
 // the comparison and the replacement one step, so of several pushes from

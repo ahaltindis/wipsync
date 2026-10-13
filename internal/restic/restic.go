@@ -137,6 +137,11 @@ type message struct {
 	FilesNew        int    `json:"files_new"`
 	FilesChanged    int    `json:"files_changed"`
 	DataAddedPacked int64  `json:"data_added_packed"`
+
+	// summary of a restore; the counts include directories
+	FilesRestored int   `json:"files_restored"`
+	FilesDeleted  int   `json:"files_deleted"`
+	BytesRestored int64 `json:"bytes_restored"`
 }
 
 // find returns the first JSON line of the given type.
@@ -184,6 +189,11 @@ type BackupOptions struct {
 	Tags     []string
 	Excludes []string
 	Parent   string // snapshot the folder is based on, if any
+
+	// AfterPull is set for the first snapshot after a pull. The pull gave
+	// every file a new ctime and inode; ignoring those keeps restic from
+	// reading every file again.
+	AfterPull bool
 }
 
 type BackupResult struct {
@@ -204,6 +214,9 @@ func (c *Client) Backup(ctx context.Context, o BackupOptions) (BackupResult, err
 	}
 	if o.Parent != "" {
 		args = append(args, "--parent", o.Parent)
+	}
+	if o.AfterPull {
+		args = append(args, "--ignore-ctime", "--ignore-inode")
 	}
 	out, err := c.run(ctx, o.Dir, args...)
 	if err != nil {
@@ -227,6 +240,9 @@ type Snapshot struct {
 	Time   time.Time `json:"time"`
 	Host   string    `json:"hostname"`
 	Tags   []string  `json:"tags"`
+
+	// Excludes are the ignore rules the snapshot was taken with.
+	Excludes []string `json:"excludes"`
 }
 
 // Snapshots lists the snapshots that carry all the given tags, oldest first.
@@ -263,4 +279,34 @@ func (c *Client) Find(ctx context.Context, id string) (Snapshot, error) {
 		return list[0], nil
 	}
 	return Snapshot{}, fmt.Errorf("restic snapshots: %d snapshots match %s", len(list), id)
+}
+
+type RestoreOptions struct {
+	ID       string
+	Dir      string   // the folder to make match the snapshot
+	Excludes []string // paths left alone: neither restored nor deleted
+}
+
+type RestoreResult struct {
+	Restored      int // files and directories written
+	Deleted       int // files and directories removed
+	BytesRestored int64
+}
+
+// Restore makes a folder match a snapshot: it writes what differs and
+// deletes what the snapshot does not have, except for excluded paths.
+func (c *Client) Restore(ctx context.Context, o RestoreOptions) (RestoreResult, error) {
+	args := []string{"restore", o.ID, "--json", "--target", o.Dir, "--delete"}
+	for _, e := range o.Excludes {
+		args = append(args, "--exclude", e)
+	}
+	out, err := c.run(ctx, "", args...)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	m, ok := find(out, "summary")
+	if !ok {
+		return RestoreResult{}, errors.New("restic restore: no summary in its output")
+	}
+	return RestoreResult{Restored: m.FilesRestored, Deleted: m.FilesDeleted, BytesRestored: m.BytesRestored}, nil
 }

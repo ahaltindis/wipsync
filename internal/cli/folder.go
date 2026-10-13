@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/ahaltindis/wipsync/internal/config"
 	"github.com/ahaltindis/wipsync/internal/restic"
@@ -30,6 +32,32 @@ func resolveFolder(cfg *config.Config, arg string) (config.Folder, error) {
 // folderTags are the tags that tie a snapshot to its folder on every client.
 func folderTags(f config.Folder) []string {
 	return []string{"root=" + f.Root, "path=" + f.Path}
+}
+
+// splitFolderName reads a folder given as "Root/path".
+func splitFolderName(name string) (root, path string, ok bool) {
+	root, path, found := strings.Cut(name, "/")
+	path = strings.TrimSuffix(path, "/")
+	return root, path, found && root != "" && path != ""
+}
+
+// folderOf reads the folder a snapshot belongs to from its tags.
+func folderOf(tags []string) (config.Folder, bool) {
+	var f config.Folder
+	for _, t := range tags {
+		if v, ok := strings.CutPrefix(t, "root="); ok {
+			f.Root = v
+		} else if v, ok := strings.CutPrefix(t, "path="); ok {
+			f.Path = v
+		}
+	}
+	return f, f.Root != "" && f.Path != ""
+}
+
+// describe says which snapshot is meant, in full: its ID, age and client.
+func describe(s restic.Snapshot) string {
+	return fmt.Sprintf("%s, the snapshot from %s (%s) by %s",
+		s.ID[:8], s.Time.Local().Format("2006-01-02 15:04"), age(time.Since(s.Time)), s.Host)
 }
 
 func checkRepository(cfg *config.Config) error {

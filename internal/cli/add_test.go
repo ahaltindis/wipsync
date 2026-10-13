@@ -21,10 +21,17 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	base := t.TempDir()
 	e := &env{t: t, home: filepath.Join(base, "home"), cfg: filepath.Join(base, "config.toml")}
-	t.Setenv("HOME", e.home)
-	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
+	e.use()
 	return e
+}
+
+// use makes this the client that commands run as. A test with two clients
+// switches between them.
+func (e *env) use() {
+	base := filepath.Dir(e.cfg)
+	e.t.Setenv("HOME", e.home)
+	e.t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
+	e.t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 }
 
 func (e *env) mkdir(rel string) string {

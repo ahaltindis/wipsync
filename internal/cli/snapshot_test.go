@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ahaltindis/wipsync/internal/state"
 )
@@ -46,11 +47,12 @@ func (e *env) restic(repo, pass string, args ...string) []byte {
 }
 
 type snapshot struct {
-	ID       string   `json:"id"`
-	Parent   string   `json:"parent"`
-	Hostname string   `json:"hostname"`
-	Tags     []string `json:"tags"`
-	Excludes []string `json:"excludes"`
+	ID       string    `json:"id"`
+	Time     time.Time `json:"time"`
+	Parent   string    `json:"parent"`
+	Hostname string    `json:"hostname"`
+	Tags     []string  `json:"tags"`
+	Excludes []string  `json:"excludes"`
 }
 
 func (e *env) snapshots(repo string) []snapshot {
