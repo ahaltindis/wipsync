@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Builds wipsync and installs it with the real PKGBUILD, the same way the AUR package will, except
+# that the release tarball comes from this working tree instead of GitHub.
+# Usage: pkg/test-local
+
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+pkgver=$(sed -n 's/^pkgver=//p' "$root/pkg/PKGBUILD")
+name=wipsync-$pkgver-x86_64
+
+build=$(mktemp -d)
+trap 'rm -rf "$build"' EXIT
+
+# The same steps as .github/workflows/release.yml.
+cd "$root"
+mkdir -p "$build/$name/completions"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -ldflags "-s -w -X main.version=$pkgver" -o "$build/$name/wipsync" ./cmd/wipsync
+"$build/$name/wipsync" completion bash >"$build/$name/completions/wipsync.bash"
+"$build/$name/wipsync" completion zsh >"$build/$name/completions/_wipsync"
+"$build/$name/wipsync" completion fish >"$build/$name/completions/wipsync.fish"
+cp LICENSE README.md "$build/$name/"
+tar -czf "$build/$name.tar.gz" -C "$build" "$name"
+rm -rf "${build:?}/$name"
+
+sed -e "s|^source=.*|source=(\"$name.tar.gz\")|" -e "s|^sha256sums=.*|sha256sums=(SKIP)|" pkg/PKGBUILD >"$build/PKGBUILD"
+
+cd "$build"
+makepkg -si --noconfirm "$@"

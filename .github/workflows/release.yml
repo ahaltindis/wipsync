@@ -1,0 +1,38 @@
+# Pushing a tag like v0.1.0 builds wipsync and attaches wipsync-0.1.0-x86_64.tar.gz to a GitHub
+# release; the AUR package wipsync-bin downloads that file.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # Without restic on the runner, the tests that need it are skipped.
+      - run: go test ./...
+      - name: Build, pack and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          name=wipsync-$version-x86_64
+          mkdir -p "$name/completions"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.version=$version" -o "$name/wipsync" ./cmd/wipsync
+          "$name/wipsync" completion bash > "$name/completions/wipsync.bash"
+          "$name/wipsync" completion zsh > "$name/completions/_wipsync"
+          "$name/wipsync" completion fish > "$name/completions/wipsync.fish"
+          cp LICENSE README.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          gh release create "$GITHUB_REF_NAME" "$name.tar.gz" "$name.tar.gz.sha256" --title "$GITHUB_REF_NAME" --generate-notes

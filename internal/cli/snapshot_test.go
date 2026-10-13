@@ -243,6 +243,7 @@ func TestSnapshotErrors(t *testing.T) {
 }
 
 func TestDoctor(t *testing.T) {
+	needRestic(t) // a missing restic would be one more problem in every count below
 	e := newEnv(t)
 
 	// Nothing set up.

@@ -9,7 +9,11 @@ import (
 	"github.com/ahaltindis/wipsync/internal/cli"
 )
 
+// version is set by the release build; see .github/workflows/release.yml.
+var version = "dev"
+
 func main() {
+	cli.Version = version
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	// The first Ctrl+C ends the command cleanly. After it, stop catching the

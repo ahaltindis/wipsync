@@ -1,1 +1,5 @@
 /wipsync
+pkg/src/
+pkg/pkg/
+pkg/*.tar.*
+pkg/*.pkg.*

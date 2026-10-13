@@ -7,9 +7,13 @@ import (
 	"github.com/ahaltindis/wipsync/internal/config"
 )
 
+// Version is what "wipsync --version" prints.
+var Version = "dev"
+
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wipsync",
+		Version:       Version,
 		Short:         "Sync work-in-progress folders between machines",
 		SilenceUsage:  true,
 		SilenceErrors: true,

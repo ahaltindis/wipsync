@@ -4,8 +4,8 @@ Work on one machine, continue on another. Syncs whole folders, including uncommi
 files and `.git`, through an always-on home server.
 
 Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log` and `doctor` work. Pull
-does not merge yet: when both sides changed it stops, and `restore` takes one side as it is. `diff`,
-the background service and packaging are not built yet.
+does not merge yet: when both sides changed it stops, and `restore` takes one side as it is. `diff`
+and the background service are not built yet.
 
 ## Model
 
@@ -139,8 +139,9 @@ Fallback: rsync over ssh with hard-link snapshots on the server.
 
 ## Packaging
 
-Own repo, released to the AUR. Archype only installs and configures it. Pairing a client with the
-server is a manual one-time step. Each client gets its own repository password, so one client can be
+Own repo, released to the AUR as `wipsync-bin`: pushing a tag builds the binary in a GitHub
+workflow, and `release.sh` updates the AUR package to it. Archype only installs and configures it.
+Pairing a client with the server is a manual one-time step. Each client gets its own repository password, so one client can be
 removed without touching the others.
 
 ## Open
