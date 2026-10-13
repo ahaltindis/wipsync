@@ -23,6 +23,20 @@ func TestBase(t *testing.T) {
 	if id, _ := s.Base("Projects", "Freelance/other"); id != "" {
 		t.Errorf("another folder has base %q", id)
 	}
+
+	// Master is kept apart from base.
+	if id, err := s.Master("Projects", "Freelance/app"); err != nil || id != "" {
+		t.Errorf("unset master = %q, %v", id, err)
+	}
+	if err := s.SetMaster("Projects", "Freelance/app", "aaa111"); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := s.Master("Projects", "Freelance/app"); id != "aaa111" {
+		t.Errorf("master = %q", id)
+	}
+	if id, _ := s.Base("Projects", "Freelance/app"); id != "def456" {
+		t.Errorf("setting master changed base to %q", id)
+	}
 }
 
 func TestDefault(t *testing.T) {

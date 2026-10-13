@@ -263,9 +263,10 @@ func TestLog(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 4 || lines[0] != "Projects/app" {
+	if len(lines) != 5 || lines[0] != "Projects/app" || lines[4] != "master is not set" {
 		t.Fatalf("unexpected output:\n%s", out)
 	}
+	lines = lines[:4]
 	// Newest first: client-b's, which is also the base, then client-a's two.
 	if f := strings.Fields(lines[1]); len(f) != 5 || f[3] != "client-b" || f[4] != "base" {
 		t.Errorf("line 1 = %q", lines[1])

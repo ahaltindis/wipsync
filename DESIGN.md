@@ -3,7 +3,8 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: design, plus a local prototype of the engine (see Engine). No client or server code yet.
+Status: `init`, `add`, `snapshot`, `push`, `log` and `doctor` work. Pull, the background service and
+packaging are not built yet.
 
 ## Model
 
@@ -16,13 +17,14 @@ Status: design, plus a local prototype of the engine (see Engine). No client or 
 - **WIP**: each client snapshots its folders to the server automatically after local changes. A client
   only writes its own WIP line, so the automatic part can't conflict. No locks, no read-only mode.
 - **master**: a pointer to one snapshot per folder, moved by a manual **push**. It marks a known good
-  state; nothing is uploaded twice.
+  state. A push takes no snapshot and uploads nothing: it points master at the snapshot the client
+  last took, so changes made since then are not part of it.
 - **pull**: manual. Takes master or another client's latest WIP into the local folder.
 
 ## Rules
 
-- A push is accepted only if master is still the snapshot the local folder is based on. Otherwise pull
-  first.
+- A push is accepted only if master is still where this client last saw it: the snapshot it last
+  pushed or pulled. Otherwise pull first.
 - Before a pull changes anything, the local state is saved as a WIP snapshot, so every pull can be undone.
 - When another client has newer WIP or master moved, the client notifies. It never pulls by itself.
 - Change detection uses snapshots and parents, not mtime (clocks differ, git rewrites mtimes).
@@ -46,11 +48,13 @@ Compared per file against the common base snapshot:
 
 ## Parts
 
-- **Server**: storage reached over ssh, plus the same CLI run over ssh for what must be atomic: the
-  push check. No daemon; one can be added later if needed.
+- **Server**: storage reached over ssh. Nothing of wipsync is installed there: for what must be
+  atomic, the push check, the client runs a short shell script over ssh. The server needs only `sh`
+  and `flock`, and neither restic nor the repository password. No daemon; a server-side command
+  can be added later if needed. Only ssh and local-disk repositories are supported.
 - **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
   CLI: `init`, `add`, `snapshot`, `status`, `log`, `diff`, `push`, `pull`, `restore`, and `doctor`
-  to check the setup. Written in Go with cobra, one binary for both sides.
+  to check the setup. Written in Go with cobra.
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to
   restic as is.
@@ -81,8 +85,9 @@ How wipsync uses it:
   mode and mtime are not restored.
 - After a pull every file has a new ctime and inode. The next snapshot passes `--ignore-ctime
   --ignore-inode` so files are not reread; it is still saved, with unchanged content.
-- master: a file per folder next to the repository, holding a snapshot ID. Only the server command
-  writes it, under a lock: move it if it still equals the caller's base, otherwise reject.
+- master: a file per folder holding a snapshot ID, in `<repository>.wipsync/` beside the
+  repository. Only the push script writes it, under a lock: move it if it still equals what the
+  caller expects, otherwise reject. The client checks that the snapshot exists; the script does not.
 - Not tags: changing a tag gives the snapshot a new ID and leaves other snapshots' parents pointing
   at the old one.
 - Not tree hashes for "same state": they cover each file's ctime and inode, which differ on every

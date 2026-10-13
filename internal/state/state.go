@@ -28,22 +28,21 @@ func Default() (*Store, error) {
 	return &Store{Dir: filepath.Join(base, "wipsync")}, nil
 }
 
-func (s *Store) baseFile(root, path string) string {
-	return filepath.Join(s.Dir, "folders", root, filepath.FromSlash(path), "base")
+func (s *Store) file(root, path, name string) string {
+	return filepath.Join(s.Dir, "folders", root, filepath.FromSlash(path), name)
 }
 
-// Base returns the snapshot the folder is based on, or "" if there is none.
-func (s *Store) Base(root, path string) (string, error) {
-	data, err := os.ReadFile(s.baseFile(root, path))
+func (s *Store) get(root, path, name string) (string, error) {
+	data, err := os.ReadFile(s.file(root, path, name))
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
 	return strings.TrimSpace(string(data)), err
 }
 
-// SetBase records the snapshot the folder is based on, in one step.
-func (s *Store) SetBase(root, path, id string) error {
-	file := s.baseFile(root, path)
+// set replaces the value in one step.
+func (s *Store) set(root, path, name, id string) error {
+	file := s.file(root, path, name)
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return err
 	}
@@ -52,4 +51,25 @@ func (s *Store) SetBase(root, path, id string) error {
 		return err
 	}
 	return os.Rename(tmp, file)
+}
+
+// Base returns the snapshot the folder is based on, or "" if there is none.
+func (s *Store) Base(root, path string) (string, error) {
+	return s.get(root, path, "base")
+}
+
+// SetBase records the snapshot the folder is based on.
+func (s *Store) SetBase(root, path, id string) error {
+	return s.set(root, path, "base", id)
+}
+
+// Master returns the master snapshot the folder was last in step with: the
+// one it last pushed or pulled. It is "" if it has done neither.
+func (s *Store) Master(root, path string) (string, error) {
+	return s.get(root, path, "master")
+}
+
+// SetMaster records the master snapshot the folder is in step with.
+func (s *Store) SetMaster(root, path, id string) error {
+	return s.set(root, path, "master", id)
 }

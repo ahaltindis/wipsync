@@ -29,6 +29,7 @@ var MinVersion = Version{0, 17, 1}
 var (
 	ErrNoRepository  = errors.New("there is no repository at that location")
 	ErrWrongPassword = errors.New("the password does not open the repository")
+	ErrNoSnapshot    = errors.New("the snapshot is not in the repository")
 )
 
 // restic's exit codes for the two failures callers tell apart.
@@ -243,4 +244,23 @@ func (c *Client) Snapshots(ctx context.Context, tags []string) ([]Snapshot, erro
 		return nil, fmt.Errorf("restic snapshots: %w", err)
 	}
 	return list, nil
+}
+
+// Find returns the snapshot with the given ID.
+func (c *Client) Find(ctx context.Context, id string) (Snapshot, error) {
+	out, err := c.run(ctx, "", "snapshots", "--json", id)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	var list []Snapshot
+	if err := json.Unmarshal(out, &list); err != nil {
+		return Snapshot{}, fmt.Errorf("restic snapshots: %w", err)
+	}
+	switch len(list) {
+	case 0:
+		return Snapshot{}, ErrNoSnapshot
+	case 1:
+		return list[0], nil
+	}
+	return Snapshot{}, fmt.Errorf("restic snapshots: %d snapshots match %s", len(list), id)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
 	"github.com/ahaltindis/wipsync/internal/state"
 )
@@ -139,6 +140,17 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 		return
 	}
 	r.ok("repository access: %s opens with the password", cfg.Repository)
+
+	// Push also needs a shell and flock where the repository is.
+	pointers, err := master.Open(cfg.Repository)
+	if err == nil {
+		err = pointers.Check(ctx)
+	}
+	if err != nil {
+		r.fail("server: %v", err)
+		return
+	}
+	r.ok("server: ready for push")
 }
 
 func (r *report) folders(cfg *config.Config) {
