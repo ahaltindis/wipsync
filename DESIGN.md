@@ -3,8 +3,8 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: `init`, `add`, `list`, `snapshot`, `push`, `log` and `doctor` work. `pull` fetches a folder
-that is not on the client yet; pulling into an existing folder, the background service and packaging
+Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `log` and `doctor` work. Pull does not
+merge yet: when both sides changed it stops. `restore`, `diff`, the background service and packaging
 are not built yet.
 
 ## Model
@@ -39,6 +39,10 @@ are not built yet.
   folder, before it calls the engine.
 
 ## Pull when both sides changed
+
+Not built yet: pull saves the local state and stops. It tells the cases apart by the snapshots'
+parents: if the target descends from the folder's snapshot, only the other side changed, and the
+folder is made to match it.
 
 Compared per file against the common base snapshot:
 

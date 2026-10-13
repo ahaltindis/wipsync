@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -189,14 +190,14 @@ func TestPullRefusals(t *testing.T) {
 	a.must("", "snapshot", "Projects/other")
 	a.must("", "push", "Projects/other")
 
-	// On the client that already has it.
-	_, err := a.run("", "pull", "Projects/app")
-	if err == nil || !strings.Contains(err.Error(), "already on this client") {
-		t.Errorf("err = %v", err)
-	}
-
 	b := a.secondClient("client-b")
 	b.use()
+	// Outside any folder, and with nothing named.
+	t.Chdir(b.mkdir("elsewhere"))
+	if _, err := b.run("", "pull"); err == nil || !strings.Contains(err.Error(), "name a folder as Root/path") {
+		t.Errorf("pull with nothing to go on: err = %v", err)
+	}
+	var err error
 	for arg, want := range map[string]string{
 		"Projects/nothing": "no snapshots of Projects/nothing",
 		"app":              "not a folder name",
@@ -316,5 +317,298 @@ func TestList(t *testing.T) {
 		"  client-b    "+line(appB1)+"\n"+
 		"  [client-a]  "+line(app1)+"  master\n") {
 		t.Errorf("list as client-a:\n%s", out)
+	}
+}
+
+// exists reports whether a file is there, relative to the client's home.
+func (e *env) exists(rel string) bool {
+	_, err := os.Stat(filepath.Join(e.home, rel))
+	return err == nil
+}
+
+func (e *env) base(root, path string) string {
+	e.t.Helper()
+	e.use()
+	store, _ := state.Default()
+	id, err := store.Base(root, path)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return id
+}
+
+// Two clients take turns working on a folder.
+func TestPullExisting(t *testing.T) {
+	a := newEnv(t)
+	repo := a.repo()
+	a.write("Projects/app/main.py", "print(1)\n")
+	a.write("Projects/app/old.txt", "to be deleted\n")
+	a.write("Projects/app/.venv/lib.py", "a's own\n")
+	dirA := filepath.Join(a.home, "Projects/app")
+	a.must("", "add", dirA)
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+
+	b := a.secondClient("client-b")
+	b.must("\n", "pull", "Projects/app")
+	dirB := filepath.Join(b.home, "Projects/app")
+
+	// Nothing happened since: both are already there.
+	for _, e := range []*env{a, b} {
+		if out := e.must("", "pull", filepath.Join(e.home, "Projects/app")); !strings.Contains(out, "Projects/app: already at ") {
+			t.Errorf("unexpected output: %s", out)
+		}
+	}
+
+	// client-b edits, adds and deletes, then pushes.
+	b.write("Projects/app/main.py", "print(2222)\n")
+	b.write("Projects/app/sub/new.txt", "new\n")
+	if err := os.Remove(filepath.Join(dirB, "old.txt")); err != nil {
+		t.Fatal(err)
+	}
+	b.must("", "snapshot", dirB)
+	b.must("", "push", dirB)
+	fromB := b.base("Projects", "app")
+
+	// client-a did nothing meanwhile, so the pull goes through. It is run
+	// from inside the folder, without naming it.
+	a.use()
+	t.Chdir(dirA)
+	out := a.must("", "pull")
+	if !strings.Contains(out, "pulled Projects/app: "+fromB[:8]) || !strings.Contains(out, "by client-b") {
+		t.Errorf("unexpected output: %s", out)
+	}
+	if strings.Contains(out, "saved its current state") {
+		t.Errorf("took a snapshot of an unchanged folder: %s", out)
+	}
+	if got := a.read("Projects/app/main.py"); got != "print(2222)\n" {
+		t.Errorf("main.py = %q", got)
+	}
+	if got := a.read("Projects/app/sub/new.txt"); got != "new\n" {
+		t.Errorf("sub/new.txt = %q", got)
+	}
+	if a.exists("Projects/app/old.txt") {
+		t.Error("a file deleted on the other client is still here")
+	}
+	if got := a.read("Projects/app/.venv/lib.py"); got != "a's own\n" {
+		t.Errorf("the ignored .venv was touched: %q", got)
+	}
+	if got := a.base("Projects", "app"); got != fromB {
+		t.Errorf("base = %q, want %q", got, fromB)
+	}
+	// The pulled state is not a change, and a real change builds on it.
+	if out := a.must("", "snapshot", dirA); !strings.Contains(out, "no changes") {
+		t.Errorf("snapshot after the pull: %s", out)
+	}
+	a.write("Projects/app/main.py", "print(3)\n")
+	a.must("", "snapshot", dirA)
+	fromA := a.base("Projects", "app")
+	for _, s := range a.snapshots(repo) {
+		if s.ID == fromA && s.Parent != fromB {
+			t.Errorf("parent of the snapshot after the pull = %q, want %q", s.Parent, fromB)
+		}
+	}
+
+	// client-a is ahead of master now: nothing to pull, and it may push.
+	if out := a.must("", "pull", dirA); !strings.Contains(out, "nothing to pull, this client is ahead of "+fromB[:8]) {
+		t.Errorf("unexpected output: %s", out)
+	}
+	if got := a.read("Projects/app/main.py"); got != "print(3)\n" {
+		t.Errorf("main.py = %q", got)
+	}
+	a.must("", "push", dirA)
+
+	// A client's latest work-in-progress, without a push.
+	a.write("Projects/app/main.py", "print(4)\n")
+	a.must("", "snapshot", dirA)
+	wip := a.base("Projects", "app")
+	if out := b.must("", "pull", "--from", "client-a", dirB); !strings.Contains(out, "pulled Projects/app: "+wip[:8]) {
+		t.Errorf("unexpected output: %s", out)
+	}
+	if got := b.read("Projects/app/main.py"); got != "print(4)\n" {
+		t.Errorf("main.py = %q", got)
+	}
+}
+
+// Both clients changed the folder: pull saves the local state and stops.
+func TestPullDiverged(t *testing.T) {
+	a := newEnv(t)
+	a.repo()
+	a.write("Projects/app/main.py", "print(1)\n")
+	dirA := filepath.Join(a.home, "Projects/app")
+	a.must("", "add", dirA)
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+	start := a.base("Projects", "app")
+
+	b := a.secondClient("client-b")
+	b.must("\n", "pull", "Projects/app")
+	dirB := filepath.Join(b.home, "Projects/app")
+	b.write("Projects/app/main.py", "print('b')\n")
+	b.must("", "snapshot", dirB)
+	b.must("", "push", dirB)
+
+	// client-a forgot to pull and edited, without taking a snapshot.
+	a.write("Projects/app/main.py", "print('a')\n")
+	a.use()
+	out, err := a.run("", "pull", dirA)
+	if err == nil || !strings.Contains(err.Error(), "both this folder and") ||
+		!strings.Contains(err.Error(), "changed since snapshot "+start[:8]) ||
+		!strings.Contains(err.Error(), "changed nothing") {
+		t.Errorf("err = %v", err)
+	}
+	// The local state was saved first, and is what the message points to.
+	saved := a.base("Projects", "app")
+	if saved == start || !strings.Contains(out, "saved its current state as snapshot "+saved[:8]) ||
+		!strings.Contains(err.Error(), "saved as snapshot "+saved[:8]) {
+		t.Errorf("out = %q, err = %v", out, err)
+	}
+	if got := a.read("Projects/app/main.py"); got != "print('a')\n" {
+		t.Errorf("the local file was changed: %q", got)
+	}
+	// Asking again changes nothing, and takes no second snapshot.
+	out, err = a.run("", "pull", dirA)
+	if err == nil || strings.Contains(out, "saved its current state") || a.base("Projects", "app") != saved {
+		t.Errorf("out = %q, err = %v", out, err)
+	}
+}
+
+// After a pull, git refreshes its index. That is not a local change, so
+// the next pull still goes through.
+func TestPullAfterGitStatus(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	a := newEnv(t)
+	a.repo()
+	a.write("Projects/app/main.py", "print(1)\n")
+	dirA := filepath.Join(a.home, "Projects/app")
+	git(dirA, "init", "-q")
+	git(dirA, "add", ".")
+	git(dirA, "commit", "-q", "-m", "first")
+	a.must("", "add", dirA)
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+
+	b := a.secondClient("client-b")
+	b.must("\n", "pull", "Projects/app")
+	dirB := filepath.Join(b.home, "Projects/app")
+	index := filepath.Join(dirB, ".git", "index")
+	pulled, _ := os.ReadFile(index)
+	git(dirB, "status")
+	if refreshed, _ := os.ReadFile(index); string(refreshed) == string(pulled) {
+		t.Fatal("git status did not rewrite the pulled index; the test proves nothing")
+	}
+
+	// client-a commits more work and pushes.
+	a.write("Projects/app/main.py", "print(2222)\n")
+	git(dirA, "commit", "-q", "-am", "second")
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+
+	out := b.must("", "pull", dirB)
+	if !strings.Contains(out, "pulled Projects/app: ") || strings.Contains(out, "saved its current state") {
+		t.Errorf("unexpected output: %s", out)
+	}
+	if got := b.read("Projects/app/main.py"); got != "print(2222)\n" {
+		t.Errorf("main.py = %q", got)
+	}
+	// The pulled repository is in order: on the new commit, with nothing to commit.
+	cmd := exec.Command("git", "-C", dirB, "status", "--porcelain")
+	if status, err := cmd.Output(); err != nil || len(status) != 0 {
+		t.Errorf("git status in the pulled folder: %q, %v", status, err)
+	}
+}
+
+// A rule added on one client reaches the other with the pull, and protects
+// what it ignores there.
+func TestPullAdoptsIgnoreRules(t *testing.T) {
+	a := newEnv(t)
+	a.repo()
+	a.write("Projects/app/main.py", "print(1)\n")
+	dirA := filepath.Join(a.home, "Projects/app")
+	a.must("", "add", dirA)
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+
+	b := a.secondClient("client-b")
+	b.must("\n", "pull", "Projects/app")
+	dirB := filepath.Join(b.home, "Projects/app")
+
+	// client-a starts ignoring dist, which it also has.
+	a.use()
+	c := a.config()
+	c.Folders[0].Ignore = append(c.Folders[0].Ignore, "dist")
+	if err := c.Save(a.cfg); err != nil {
+		t.Fatal(err)
+	}
+	a.write("Projects/app/dist/out.bin", "a's build\n")
+	a.write("Projects/app/main.py", "print(2222)\n")
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+
+	out := b.must("", "pull", dirB)
+	if !strings.Contains(out, "its ignore rules are now ") || !strings.Contains(out, "dist") {
+		t.Errorf("unexpected output: %s", out)
+	}
+	if got := b.config().Folders[0].Ignore; strings.Join(got, " ") != strings.Join(c.Folders[0].Ignore, " ") {
+		t.Errorf("ignore rules = %v", got)
+	}
+	if b.exists("Projects/app/dist") {
+		t.Error("the ignored dist came along")
+	}
+	// client-b's own dist is now outside the sync: not a change, and not
+	// deleted by the next pull.
+	b.write("Projects/app/dist/out.bin", "b's build\n")
+	if out := b.must("", "snapshot", dirB); !strings.Contains(out, "no changes") {
+		t.Errorf("an ignored directory counted as a change: %s", out)
+	}
+	a.write("Projects/app/main.py", "print(3)\n")
+	a.must("", "snapshot", dirA)
+	a.must("", "push", dirA)
+	b.must("", "pull", dirB)
+	if got := b.read("Projects/app/dist/out.bin"); got != "b's build\n" {
+		t.Errorf("dist/out.bin = %q", got)
+	}
+	if got := b.read("Projects/app/main.py"); got != "print(3)\n" {
+		t.Errorf("main.py = %q", got)
+	}
+}
+
+func TestDescends(t *testing.T) {
+	// a <- b <- c, and a <- x; y stands alone.
+	parents := map[string]string{"a": "", "b": "a", "c": "b", "x": "a", "y": "gone"}
+	for _, tc := range []struct {
+		id, ancestor string
+		want         bool
+	}{
+		{"c", "a", true}, {"c", "b", true}, {"b", "c", false}, {"c", "c", false},
+		{"x", "b", false}, {"y", "a", false}, {"a", "", false},
+	} {
+		if got := descends(parents, tc.id, tc.ancestor); got != tc.want {
+			t.Errorf("descends(%s, %s) = %v", tc.id, tc.ancestor, got)
+		}
+	}
+	for _, tc := range []struct{ a, b, want string }{
+		{"c", "x", "a"}, {"c", "b", "b"}, {"x", "x", "x"}, {"c", "y", ""},
+	} {
+		if got := commonAncestor(parents, tc.a, tc.b); got != tc.want {
+			t.Errorf("commonAncestor(%s, %s) = %q, want %q", tc.a, tc.b, got, tc.want)
+		}
+	}
+	// A loop in the links must not hang.
+	loop := map[string]string{"p": "q", "q": "p"}
+	if descends(loop, "p", "z") || commonAncestor(loop, "p", "z") != "" {
+		t.Error("a loop was not handled")
 	}
 }
