@@ -118,31 +118,65 @@ func (m Model) path() string {
 	return filepath.Join(m.br.dir, e.name)
 }
 
-// openBrowser switches the left pane to the file system, starting beside
-// whatever was selected.
+// openBrowser switches the left pane to the file system, on the directory
+// of the folder or root that was selected. If that has no directory here,
+// the browser is where it was left.
 func (m *Model) openBrowser() {
 	m.view, m.focus = files, folders
-	if m.br.dir != "" {
-		m.browse(m.br.dir, filepath.Base(m.path()))
-		return
-	}
-	start, name := "", ""
-	r := m.trackedRow()
-	switch {
+	target := ""
+	switch r := m.trackedRow(); {
 	case r.folder != nil && r.folder.Dir != "":
-		start, name = filepath.Dir(r.folder.Dir), filepath.Base(r.folder.Dir)
+		target = r.folder.Dir
 	case r.root != "":
-		if dir, ok := m.back.RootDir(r.root); ok {
-			start, name = filepath.Dir(dir), filepath.Base(dir)
+		target, _ = m.back.RootDir(r.root)
+	}
+	switch {
+	case target != "":
+		if strings.HasPrefix(filepath.Base(target), ".") {
+			m.br.hidden = true // or it could not be shown
+		}
+		m.browse(filepath.Dir(target), filepath.Base(target))
+	case m.br.dir != "":
+		e, _ := m.entry()
+		m.browse(m.br.dir, e.name)
+	default:
+		start, err := os.UserHomeDir()
+		if err != nil {
+			start = "/"
+		}
+		m.browse(start, "")
+	}
+}
+
+// closeBrowser switches the left pane back to the folders, on the folder
+// the browser was on or inside; failing that, on the root it was under.
+func (m *Model) closeBrowser() {
+	m.view = tracked
+	at := m.path()
+	if at == "" {
+		at = m.br.dir // an empty directory has nothing selected
+	}
+	name := ""
+	for p := at; name == ""; p = filepath.Dir(p) {
+		if f := m.byDir[p]; f != nil {
+			name = f.Folder.String()
+		}
+		if p == filepath.Dir(p) {
+			break
 		}
 	}
-	if start == "" {
-		start, _ = os.UserHomeDir()
+	for p := at; name == ""; p = filepath.Dir(p) {
+		name = m.rootAt[p]
+		if p == filepath.Dir(p) {
+			break
+		}
 	}
-	if start == "" {
-		start = "/"
+	for i, r := range m.rows {
+		if name != "" && r.name() == name && i != m.sel {
+			m.sel, m.logSel, m.logTop = i, 0, 0
+		}
 	}
-	m.browse(start, name)
+	m.scroll()
 }
 
 // browserKey handles a key while the left pane shows the file system. It

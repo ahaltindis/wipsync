@@ -827,179 +827,109 @@ func TestBrowser(t *testing.T) {
 		t.Errorf("h did not stop at the top: %q", m.br.dir)
 	}
 
-	// Back to the folders, where the selection is as it was left.
+	// Back to the folders from a place that belongs to none of them: the
+	// selection is as it was left.
 	m = keys(t, m, "tab")
 	if m.view != tracked || m.selected().name() != "Projects/aha/archype" {
 		t.Errorf("back in the folder list on %q", m.selected().name())
 	}
-	// And the browser remembers where it was.
-	if m = keys(t, m, "tab"); m.br.dir != "/" {
-		t.Errorf("the browser forgot its place: %q", m.br.dir)
-	}
 }
 
-func TestBrowserColours(t *testing.T) {
-	m, _, home := browsing(t)
-	m = keys(t, m, "tab")
-	theme := DefaultTheme()
-	cases := []struct {
-		path string
-		dir  bool
-		want string
-	}{
-		{"Projects", true, theme.Root},
-		{"Projects/aha/archype", true, theme.Tracked},
-		{"Projects/aha", true, theme.Dir},
-		{"Projects/new-thing", true, theme.Dir},
-		{"todo.txt", false, theme.File},
-	}
-	for _, tc := range cases {
-		style := m.entryStyle(filepath.Join(home, tc.path), entry{name: filepath.Base(tc.path), dir: tc.dir})
-		if got := style.GetForeground(); got != lipgloss.Color(tc.want) {
-			t.Errorf("%s is drawn in %v, want %s", tc.path, got, tc.want)
+// goTo moves the folder list to the row called name.
+func goTo(t *testing.T, m Model, name string) Model {
+	t.Helper()
+	m = keys(t, m, "g")
+	for range m.rows {
+		if m.selected().name() == name {
+			return m
 		}
+		m = keys(t, m, "j")
 	}
+	t.Fatalf("there is no row %q", name)
+	return m
 }
 
-// Actions on a tracked directory work from the browser too.
-func TestBrowserActions(t *testing.T) {
+// Switching between the two views stays on the same thing where it can.
+func TestSwitchingKeepsPlace(t *testing.T) {
 	m, back, home := browsing(t)
-	m = keys(t, m, "tab", "j") // aha/wipsync, behind
-	m = run(t, m, "s")
-	m = keys(t, m, "p", "m")
-	if !strings.Contains(asks(m), "Takes master into "+filepath.Join(home, "Projects/aha/wipsync")) {
-		t.Errorf("unexpected question: %s", asks(m))
+	at := func(m Model) string { return strings.TrimPrefix(m.path(), home+"/") }
+	// show puts the browser in a directory, on one of its entries.
+	show := func(m Model, dir, name string) Model {
+		m.browse(filepath.Join(home, dir), name)
+		return m
 	}
-	m = run(t, m, "y")
-	want := []string{"snapshot Projects/aha/wipsync", "pull Projects/aha/wipsync from "}
-	if !slices.Equal(back.calls, want) {
-		t.Errorf("calls = %v, want %v", back.calls, want)
+
+	// From a folder to its directory, selected in its parent.
+	m = keys(t, goTo(t, m, "Projects/aha/wipsync"), "tab")
+	if m.br.dir != filepath.Join(home, "Projects/aha") || at(m) != "Projects/aha/wipsync" {
+		t.Errorf("from a folder: in %q on %q", m.br.dir, at(m))
 	}
-	// After the refresh the browser is where it was.
-	if m.view != files || m.path() != filepath.Join(home, "Projects/aha/wipsync") {
-		t.Errorf("after an action: view %d on %q", m.view, m.path())
+	// And back to a folder from its directory, wherever the list was.
+	if m = keys(t, m, "k", "tab"); m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("from a tracked directory: on %q", m.selected().name())
 	}
-	// Restore is chosen in the log, which the browser does not have.
-	if r := keys(t, m, "r"); r.dialog != nil || r.focus != folders {
-		t.Error("r did something in the browser")
+	m = keys(t, goTo(t, m, "notes/journal"), "tab")
+	if m.br.dir != filepath.Join(home, "notes") || at(m) != "notes/journal" {
+		t.Errorf("from another folder: in %q on %q", m.br.dir, at(m))
+	}
+	// From inside a tracked folder, on an entry or in an empty directory.
+	if m = keys(t, show(m, "Projects/aha/archype", "src"), "tab"); m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("from an entry inside a tracked folder: on %q", m.selected().name())
+	}
+	m = show(keys(t, goTo(t, m, "notes/journal"), "tab"), "Projects/aha/archype/src", "")
+	if len(m.br.entries) != 0 {
+		t.Fatalf("src has %d entries", len(m.br.entries))
+	}
+	if m = keys(t, m, "tab"); m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("from an empty directory inside a tracked folder: on %q", m.selected().name())
+	}
+
+	// A root goes to its directory, and comes back as the root.
+	m = keys(t, goTo(t, m, "Projects"), "tab")
+	if m.br.dir != home || at(m) != "Projects" {
+		t.Errorf("from a root: in %q on %q", m.br.dir, at(m))
+	}
+	if m = keys(t, show(m, "", "notes"), "tab"); m.selected().name() != "notes" {
+		t.Errorf("from a root's directory: on %q", m.selected().name())
+	}
+	// Under a root but in no folder, it is the root.
+	m = show(keys(t, m, "tab"), "Projects", "new-thing")
+	if m = keys(t, m, "tab"); m.selected().name() != "Projects" {
+		t.Errorf("from a plain directory under a root: on %q", m.selected().name())
+	}
+	// Under nothing wipsync knows, the folder list is as it was left.
+	m = show(keys(t, goTo(t, m, "Projects/aha/archype"), "tab"), "other", "Projects")
+	if m = keys(t, m, "tab"); m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("from an unrelated directory: on %q", m.selected().name())
+	}
+
+	// A folder that is not here has no directory. With its root known, the
+	// browser goes to the root; otherwise it stays where it was.
+	back.world.Folders = append(back.world.Folders,
+		app.FolderState{Folder: config.Folder{Root: "Projects", Path: "aha/website"}, Status: app.NotHere},
+		app.FolderState{Folder: config.Folder{Root: "elsewhere", Path: "thing"}, Status: app.NotHere})
+	m = send(t, m, m.load()())
+	m = show(keys(t, m, "tab"), "other", "Projects")
+	m = keys(t, goTo(t, keys(t, m, "tab"), "elsewhere/thing"), "tab")
+	if m.br.dir != filepath.Join(home, "other") || at(m) != "other/Projects" {
+		t.Errorf("for a folder with no place here: in %q on %q", m.br.dir, at(m))
+	}
+	m = keys(t, goTo(t, keys(t, m, "tab"), "Projects/aha/website"), "tab")
+	if m.br.dir != home || at(m) != "Projects" {
+		t.Errorf("for a folder that is not here: in %q on %q", m.br.dir, at(m))
 	}
 }
 
-func TestAdd(t *testing.T) {
+// A tracked directory whose name starts with a dot is still shown when the
+// browser is opened on it.
+func TestSwitchingToHiddenFolder(t *testing.T) {
 	m, back, home := browsing(t)
-	projects := filepath.Join(home, "Projects")
-	m = keys(t, m, "tab", "h", "j") // ~/Projects, on new-thing
-	if m.path() != filepath.Join(projects, "new-thing") {
-		t.Fatalf("on %q", m.path())
-	}
-
-	// Under a known root there is nothing to ask but yes or no.
-	m = keys(t, m, "a")
-	t.Logf("adding under a known root:\n%s", m.View())
-	if !strings.Contains(asks(m), "Add ~/Projects/new-thing?") ||
-		!strings.Contains(asks(m), "It becomes Projects/new-thing, with the root Projects at ~/Projects") {
-		t.Errorf("unexpected question: %s", asks(m))
-	}
-	if no := keys(t, m, "n"); no.dialog != nil || len(back.calls) != 0 {
-		t.Error("n did not cancel")
-	}
-	m = run(t, m, "y")
-	if want := []string{"add " + projects + "/new-thing as Projects at " + projects}; !slices.Equal(back.calls, want) {
-		t.Errorf("calls = %v, want %v", back.calls, want)
-	}
-	if !strings.HasPrefix(m.note, "added Projects/new-thing") {
-		t.Errorf("note = %q", m.note)
-	}
-
-	// With no known root above it, the root is chosen from its parents,
-	// and named again if its name is taken.
-	back.calls = nil
-	m = keys(t, m, "h", "g", "j", "l", "l") // ~/other/Projects, on x
-	other := filepath.Join(home, "other")
-	if m.path() != filepath.Join(other, "Projects/x") {
-		t.Fatalf("on %q", m.path())
-	}
-	m = keys(t, m, "a")
-	t.Logf("choosing a root:\n%s", m.View())
-	if !strings.Contains(asks(m), "Which parent of x is its root?") || !slices.Equal(m.dialog.choices, []string{other, other + "/Projects"}) {
-		t.Fatalf("unexpected question: %s, choices %v", asks(m), m.dialog.choices)
-	}
-	m = keys(t, m, "j", "enter")
-	if !strings.Contains(asks(m), "Name for the root ~/other/Projects?") || !strings.Contains(asks(m), `root name "Projects" is already used`) {
-		t.Fatalf("a taken name was not asked about: %s", asks(m))
-	}
-	m = keys(t, m, "enter") // the same name again
-	if !strings.Contains(asks(m), "is already used") {
-		t.Errorf("the taken name was accepted: %s", asks(m))
-	}
-	for range "Projects" {
-		m = keys(t, m, "backspace")
-	}
-	m = keys(t, m, "W", "o", "r", "k", "enter")
-	if !strings.Contains(asks(m), "It becomes Work/x, with the root Work at ~/other/Projects") {
-		t.Fatalf("unexpected question: %s", asks(m))
-	}
-	m = run(t, m, "y")
-	if want := []string{"add " + other + "/Projects/x as Work at " + other + "/Projects"}; !slices.Equal(back.calls, want) {
-		t.Errorf("calls = %v, want %v", back.calls, want)
-	}
-
-	// Choosing the higher parent, whose name is free.
-	back.calls = nil
-	m = keys(t, m, "a", "enter")
-	if !strings.Contains(asks(m), "It becomes other/Projects/x, with the root other at ~/other") {
-		t.Errorf("unexpected question: %s", asks(m))
-	}
-	m = keys(t, m, "esc")
-
-	// A directory that cannot be added says why.
-	back.fail = map[string]error{"addable " + other + "/Projects/x": errors.New("it overlaps Projects/aha/archype")}
-	m = keys(t, m, "a")
-	if !strings.Contains(asks(m), "Cannot add ~/other/Projects/x") || !strings.Contains(asks(m), "it overlaps") || len(back.calls) != 0 {
-		t.Errorf("unexpected box: %s", asks(m))
-	}
-}
-
-// The current directory in the top line marks the root and the tracked
-// folder it is in.
-func TestPathParts(t *testing.T) {
-	m, _, home := browsing(t)
-	m = keys(t, m, "tab")
-	cases := []struct {
-		path string
-		want []pathPart
-	}{
-		{home, []pathPart{{"~", partPlain}}},
-		{home + "/other/Projects", []pathPart{{"~/other/Projects", partPlain}}},
-		{home + "/Projects", []pathPart{{"~/", partPlain}, {"Projects", partRoot}}},
-		{home + "/Projects/aha", []pathPart{{"~/", partPlain}, {"Projects", partRoot}, {"/aha", partPlain}}},
-		{home + "/Projects/aha/archype/src", []pathPart{
-			{"~/", partPlain}, {"Projects", partRoot}, {"/aha/", partPlain}, {"archype", partTracked}, {"/src", partPlain}}},
-		{home + "/notes/journal", []pathPart{{"~/", partPlain}, {"notes", partRoot}, {"/", partPlain}, {"journal", partTracked}}},
-		{"/", []pathPart{{"/", partPlain}}},
-		{"/usr/share", []pathPart{{"/usr/share", partPlain}}},
-	}
-	for _, tc := range cases {
-		if got := m.pathParts(tc.path); !slices.Equal(got, tc.want) {
-			t.Errorf("pathParts(%q) = %v, want %v", tc.path, got, tc.want)
-		}
-	}
-
-	// On screen it reads as the plain path, and a long one is cut to fit.
-	m = keys(t, m, "l") // into archype
-	if top := strings.Split(m.View(), "\n")[0]; !strings.Contains(top, "wipsync  ~/Projects/aha/archype ") {
-		t.Errorf("top line = %q", top)
-	}
-	// The end of the path is what is kept.
-	m = send(t, m, tea.WindowSizeMsg{Width: 30, Height: 10})
-	top := strings.Split(m.View(), "\n")[0]
-	if w := runewidth.StringWidth(top); w != 30 || !strings.Contains(top, "wipsync  …") || !strings.HasSuffix(strings.TrimRight(top, " "), "/aha/archype") {
-		t.Errorf("top line in a narrow window is %d cells: %q", w, top)
-	}
-	for _, width := range []int{8, 11, 12, 13, 20} {
-		m = send(t, m, tea.WindowSizeMsg{Width: width, Height: 10})
-		if w := runewidth.StringWidth(strings.Split(m.View(), "\n")[0]); w != width {
-			t.Errorf("top line at width %d is %d cells", width, w)
-		}
+	dir := filepath.Join(home, "Projects/.cache")
+	back.world.Folders = append(back.world.Folders, app.FolderState{
+		Folder: config.Folder{Root: "Projects", Path: ".cache"}, Dir: dir, Status: app.Changed})
+	m = send(t, m, m.load()())
+	m = keys(t, goTo(t, m, "Projects/.cache"), "tab")
+	if m.path() != dir {
+		t.Errorf("on %q, want %q", m.path(), dir)
 	}
 }

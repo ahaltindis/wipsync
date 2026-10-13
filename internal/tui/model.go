@@ -149,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == tracked {
 				m.openBrowser()
 			} else {
-				m.view = tracked
+				m.closeBrowser()
 			}
 			return m, nil
 		case key == "R":
