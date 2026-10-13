@@ -14,6 +14,9 @@ import (
 // logHeader is how many lines the log pane shows above the snapshots.
 const logHeader = 4
 
+// markSign stands at the start of a marked line.
+const markSign = "┃"
+
 // cut makes s exactly w cells wide: shortened with an ellipsis, or padded.
 func cut(s string, w int) string {
 	if w <= 0 {
@@ -97,27 +100,46 @@ func (m Model) header() string {
 }
 
 func (m Model) footer() string {
-	// Only what can be done from here is offered.
-	keys := " j/k move"
-	switch e, _ := m.entry(); {
+	// Only what can be done from here is offered. What is always there
+	// comes last, where a narrow window cuts first.
+	var groups []string
+	e, _ := m.entry()
+	switch {
 	case m.view == files && e.dir:
-		keys += "  h up  l open"
+		groups = append(groups, "h up  l open")
 	case m.view == files:
-		keys += "  h up"
+		groups = append(groups, "h up")
 	case m.focus == log:
-		keys += "  h folders"
+		groups = append(groups, "h folders")
 	case len(m.selected().snapshots()) > 0:
-		keys += "  l log"
+		groups = append(groups, "l log")
 	}
-	keys += "  "
+	k := m.marked()
+	marking := k.any() && m.focus == folders
+	var acts []string
+	if marking {
+		acts = append(acts, fmt.Sprintf("%d marked:", len(k.folders)+len(k.dirs)))
+	}
 	for _, a := range m.actions() {
-		keys += "  " + a.key + " " + a.does
+		acts = append(acts, a.key+" "+a.does)
+	}
+	if len(acts) > 0 {
+		groups = append(groups, strings.Join(acts, "  "))
+	}
+	var view []string
+	switch {
+	case marking:
+		view = append(view, "space mark", "esc unmark all")
+	case m.focus == folders && (m.view == tracked || e.dir):
+		view = append(view, "space mark")
 	}
 	if m.view == files {
-		keys += "    . hidden  tab folders  R refresh  q quit"
+		view = append(view, ". hidden", "tab folders")
 	} else {
-		keys += "    tab browse  R refresh  q quit"
+		view = append(view, "tab browse")
 	}
+	groups = append(groups, strings.Join(view, "  "), "j/k move  R refresh  q quit")
+	keys := " " + strings.Join(groups, "    ")
 	switch {
 	case m.err != nil:
 		return fg(m.theme.Error).Render(cut(" "+m.err.Error(), m.width))
@@ -176,10 +198,17 @@ func (m Model) folderLines(w, h int) []string {
 			style = fg(colour)
 			text = cut("   "+r.folder.Folder.Path, w-runewidth.StringWidth(word)-2) + " " + word + " "
 		}
-		if i == m.sel {
-			style = m.selection(folders)
+		isMarked := r.folder != nil && m.marks[r.name()]
+		switch {
+		case i == m.sel && isMarked:
+			lines = append(lines, m.selection(folders).Render(markSign+text[1:]))
+		case i == m.sel:
+			lines = append(lines, m.selection(folders).Render(text))
+		case isMarked:
+			lines = append(lines, fg(m.theme.Marked).Bold(true).Render(markSign)+style.Render(text[1:]))
+		default:
+			lines = append(lines, style.Render(text))
 		}
-		lines = append(lines, style.Render(text))
 	}
 	for len(lines) < h {
 		lines = append(lines, strings.Repeat(" ", w))

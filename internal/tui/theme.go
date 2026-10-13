@@ -23,6 +23,9 @@ type Theme struct {
 	Diverged string `toml:"diverged"`
 	NotHere  string `toml:"not_here"`
 
+	// The sign on lines marked with space.
+	Marked string `toml:"marked"`
+
 	// Marks in a folder's log.
 	Master string `toml:"master"`
 	Base   string `toml:"base"`
@@ -53,6 +56,8 @@ func DefaultTheme() Theme {
 		Behind:   "203", // red
 		Diverged: "199", // pink
 		NotHere:  "244", // grey
+
+		Marked: "214", // amber
 
 		Master: "220",
 		Base:   "75",

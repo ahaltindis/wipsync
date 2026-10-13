@@ -237,7 +237,7 @@ func TestScreen(t *testing.T) {
 		"/home/u/Projects/aha/archype",
 		"in step with master",
 		"b1b1b1b1  2026-10-13 10:30  desktop    master  base",
-		"j/k move  l log    s snapshot  P push  p pull  r restore    tab browse  R refresh  q quit",
+		"l log    s snapshot  P push  p pull  r restore    space mark  tab browse",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -329,10 +329,10 @@ func TestHints(t *testing.T) {
 		typed []string
 		want  string
 	}{
-		{"a folder that is here", nil, "j/k move  l log    s snapshot  P push  p pull  r restore    tab browse  R refresh  q quit"},
-		{"a folder that is not here", []string{"j"}, "j/k move  l log    p pull    tab browse  R refresh  q quit"},
-		{"a root", []string{"g"}, "j/k move    p pull all    tab browse  R refresh  q quit"},
-		{"a snapshot in the log", []string{"j", "l"}, "j/k move  h folders    r restore this snapshot    tab browse  R refresh  q quit"},
+		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore    space mark  tab browse    j/k move  R refresh  q quit"},
+		{"a folder that is not here", []string{"j"}, "l log    p pull    space mark  tab browse    j/k move  R refresh  q quit"},
+		{"a root", []string{"g"}, "p pull all    space mark  tab browse    j/k move  R refresh  q quit"},
+		{"a snapshot in the log", []string{"j", "l"}, "h folders    r restore this snapshot    tab browse    j/k move  R refresh  q quit"},
 	}
 	for _, tc := range cases {
 		m = keys(t, m, tc.typed...)
@@ -752,7 +752,7 @@ func TestBrowser(t *testing.T) {
 		" archype/", "tracked", " wipsync/", "behind",
 		// A tracked directory shows what the folder list would: its log.
 		"Projects/aha/archype", "in step with master", "b1b1b1b1",
-		"j/k move  h up  l open    s snapshot  P push  p pull    . hidden  tab folders  R refresh  q quit",
+		"h up  l open    s snapshot  P push  p pull    space mark  . hidden  tab folders",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -766,7 +766,7 @@ func TestBrowser(t *testing.T) {
 	if m.br.dir != filepath.Join(home, "Projects") || m.path() != filepath.Join(home, "Projects/aha") {
 		t.Fatalf("after h: at %q on %q", m.br.dir, m.path())
 	}
-	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "j/k move  h up  l open    a add    . hidden"} {
+	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add    space mark  . hidden"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
 		}
@@ -801,7 +801,7 @@ func TestBrowser(t *testing.T) {
 	if m.path() != filepath.Join(home, "todo.txt") {
 		t.Fatalf("G went to %q", m.path())
 	}
-	if got := bottom(m); got != "j/k move  h up      . hidden  tab folders  R refresh  q quit" {
+	if got := bottom(m); got != "h up    . hidden  tab folders    j/k move  R refresh  q quit" {
 		t.Errorf("bottom line on a file = %q", got)
 	}
 	if !strings.Contains(m.View(), "6 B, changed ") {
@@ -931,5 +931,206 @@ func TestSwitchingToHiddenFolder(t *testing.T) {
 	m = keys(t, goTo(t, m, "Projects/.cache"), "tab")
 	if m.path() != dir {
 		t.Errorf("on %q, want %q", m.path(), dir)
+	}
+}
+
+// Space marks rows; the action keys then apply to everything marked.
+func TestMarkingFolders(t *testing.T) {
+	m, back := started(t, 130, 20)
+	// On aha/archype: space marks it and moves on, twice.
+	m = keys(t, m, " ", " ")
+	if m.selected().name() != "Projects/aha/wipsync" || len(m.marked().folders) != 2 {
+		t.Fatalf("after two spaces: on %q with %d marked", m.selected().name(), len(m.marked().folders))
+	}
+	screen := m.View()
+	t.Logf("two folders marked:\n%s", screen)
+	if !strings.Contains(screen, "┃  aha/archype") || !strings.Contains(screen, "┃  aha/website") || strings.Contains(screen, "┃  aha/wipsync") {
+		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
+	}
+	// archype is here and website is not: one to snapshot or push, two to pull.
+	if got, want := bottom(m), "l log    2 marked:  s snapshot 1  P push 1  p pull 2    space mark  esc unmark all  tab browse    j/k move  R refresh  q quit"; got != want {
+		t.Errorf("bottom line:\n got %q\nwant %q", got, want)
+	}
+	// Space again unmarks.
+	if un := keys(t, m, "k", " "); len(un.marked().folders) != 1 {
+		t.Errorf("%d marked after unmarking one", len(un.marked().folders))
+	}
+	// The log keeps its own keys while it has the focus.
+	if in := keys(t, m, "l"); !strings.Contains(bottom(in), "r restore this snapshot") || strings.Contains(bottom(in), "marked") {
+		t.Errorf("in the log with marks: %q", bottom(in))
+	}
+
+	m = keys(t, m, " ") // wipsync too
+	m = run(t, m, "s")
+	want := []string{"snapshot Projects/aha/archype", "snapshot Projects/aha/wipsync"}
+	if !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if m.note != "2 folders: 2 snapshots saved, 0 unchanged" || m.marked().any() {
+		t.Errorf("note = %q, still marked: %v", m.note, m.marked().any())
+	}
+
+	// A root's line marks everything under it, and unmarks it again.
+	back.calls = nil
+	m = keys(t, goTo(t, m, "notes"), " ")
+	if n := len(m.marked().folders); n != 2 {
+		t.Fatalf("%d marked under the root, want 2", n)
+	}
+	if un := keys(t, goTo(t, m, "notes"), " "); un.marked().any() {
+		t.Error("space on a root with all marked did not unmark them")
+	}
+	back.fail = map[string]error{"push notes/recipes": errors.New("notes/recipes: push rejected")}
+	m = run(t, m, "P")
+	if want := []string{"push notes/journal", "push notes/recipes"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if !strings.Contains(asks(m), "1 of 2 failed") || !strings.Contains(asks(m), "notes/recipes: push rejected") || m.note != "pushed 1 of 2 folders" {
+		t.Errorf("box: %s, note: %q", asks(m), m.note)
+	}
+	m = keys(t, m, "enter")
+
+	// Esc drops all marks.
+	m = keys(t, goTo(t, m, "Projects"), " ")
+	if m = keys(t, m, "esc"); m.marked().any() {
+		t.Error("esc did not unmark")
+	}
+}
+
+func TestPullingMarked(t *testing.T) {
+	m, back := started(t, 130, 20)
+	m = keys(t, goTo(t, m, "Projects"), " ") // all four: three here, one not
+	m = keys(t, m, "p")
+	if !strings.Contains(asks(m), "Pull 4 marked folders?") || !strings.Contains(asks(m), "3 are here, 1 are not on this client yet") {
+		t.Fatalf("unexpected question: %s", asks(m))
+	}
+	if no := keys(t, m, "n"); !no.marked().any() || len(back.calls) != 0 {
+		t.Error("n pulled, or dropped the marks")
+	}
+	m = run(t, m, "y")
+	want := []string{
+		"pull Projects/aha/archype from ",
+		"target Projects/aha/website from ", "fetch Projects/aha/website into /home/u/Projects",
+		"pull Projects/aha/wipsync from ",
+		"pull Projects/Freelance/kadir/boxing-machine from ",
+	}
+	if !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v\nwant    %v", back.calls, want)
+	}
+	if m.note != "pulled 4 of 4 folders" || m.marked().any() {
+		t.Errorf("note = %q, still marked: %v", m.note, m.marked().any())
+	}
+
+	// A root with no place here is asked for once; two such roots are too many.
+	back.calls, back.roots = nil, map[string]string{"notes": "/home/u/notes"}
+	back.world.Folders = append(back.world.Folders,
+		app.FolderState{Folder: config.Folder{Root: "Work", Path: "a"}, Status: app.NotHere},
+		app.FolderState{Folder: config.Folder{Root: "Work", Path: "b"}, Status: app.NotHere},
+		app.FolderState{Folder: config.Folder{Root: "Zeta", Path: "c"}, Status: app.NotHere})
+	m = send(t, m, m.load()())
+	t.Setenv("HOME", "/home/u")
+	m = keys(t, goTo(t, m, "Work"), " ", "p")
+	if !strings.Contains(asks(m), "Where is Work on this machine?") {
+		t.Fatalf("the root was not asked for: %s", asks(m))
+	}
+	m = run(t, keys(t, m, "enter"), "y")
+	if got := back.calls; len(got) != 4 || got[1] != "fetch Work/a into /home/u/Work" || got[3] != "fetch Work/b into /home/u/Work" {
+		t.Errorf("calls = %v", got)
+	}
+	m = keys(t, goTo(t, m, "Work"), " ")
+	m = keys(t, goTo(t, m, "Zeta"), " ", "p")
+	if !strings.Contains(asks(m), "2 roots this client has no location for: Work, Zeta") {
+		t.Errorf("unexpected box: %s", asks(m))
+	}
+}
+
+func TestMarkingInBrowser(t *testing.T) {
+	m, back, home := browsing(t)
+	projects := filepath.Join(home, "Projects")
+	for _, dir := range []string{"one", "two", "three"} {
+		if err := os.Mkdir(filepath.Join(projects, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m = keys(t, m, "tab", "h") // ~/Projects: aha, new-thing, one, three, two
+	m.browse(projects, "new-thing")
+	m = keys(t, m, " ", " ", "j", " ") // new-thing, one, and two; not three
+	screen := m.View()
+	t.Logf("three directories marked:\n%s", screen)
+	if !strings.Contains(screen, "┃new-thing/") || !strings.Contains(screen, "┃one/") || !strings.Contains(screen, "┃two/") || strings.Contains(screen, "┃three/") {
+		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
+	}
+	if !strings.Contains(bottom(m), "3 marked:  a add 3    space mark  esc unmark all  . hidden  tab folders") {
+		t.Errorf("bottom line = %q", bottom(m))
+	}
+	// Marks stay while moving around, and other views have their own.
+	m = keys(t, m, "h", "l")
+	if n := len(m.marked().dirs); n != 3 {
+		t.Errorf("%d marked after moving away and back", n)
+	}
+	if away := keys(t, m, "tab"); away.marked().any() {
+		t.Error("the browser's marks show in the folder list")
+	}
+
+	m = keys(t, m, "a")
+	if !strings.Contains(asks(m), "Add 3 directories?") ||
+		!strings.Contains(asks(m), "They become Projects/new-thing, Projects/one, Projects/two.") {
+		t.Fatalf("unexpected question: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	want := []string{
+		"add " + projects + "/new-thing as Projects at " + projects,
+		"add " + projects + "/one as Projects at " + projects,
+		"add " + projects + "/two as Projects at " + projects,
+	}
+	if !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v\nwant    %v", back.calls, want)
+	}
+	if !strings.HasPrefix(m.note, "added 3 of 3 folders") || m.marked().any() {
+		t.Errorf("note = %q, still marked: %v", m.note, m.marked().any())
+	}
+
+	// Tracked and untracked together: each key takes what it applies to.
+	back.calls = nil
+	m.browse(filepath.Join(projects, "aha"), "archype")
+	m = keys(t, m, " ")
+	m.browse(projects, "three")
+	m = keys(t, m, " ")
+	if !strings.Contains(bottom(m), "2 marked:  s snapshot 1  P push 1  p pull 1  a add 1") {
+		t.Errorf("bottom line = %q", bottom(m))
+	}
+	// A file is not marked, and space still moves on.
+	m.browse(home, "todo.txt")
+	before := len(m.marked().dirs) + len(m.marked().folders)
+	if m = keys(t, m, " "); len(m.marked().dirs)+len(m.marked().folders) != before {
+		t.Error("a file was marked")
+	}
+	m = keys(t, m, "esc")
+
+	// Directories under no known root share one, asked for once.
+	other := filepath.Join(home, "other")
+	if err := os.Mkdir(filepath.Join(other, "Projects/y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.browse(filepath.Join(other, "Projects"), "x")
+	m = keys(t, m, " ", " ", "a")
+	if !strings.Contains(asks(m), "Which parent is the root of the 2 directories") || !slices.Equal(m.dialog.choices, []string{other, other + "/Projects"}) {
+		t.Fatalf("unexpected question: %s, choices %v", asks(m), m.dialog.choices)
+	}
+	m = keys(t, m, "enter")
+	if !strings.Contains(asks(m), "They become other/Projects/x, other/Projects/y.") {
+		t.Fatalf("unexpected question: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	if len(back.calls) != 2 || back.calls[1] != "add "+other+"/Projects/y as other at "+other {
+		t.Errorf("calls = %v", back.calls)
+	}
+
+	// One that cannot be added stops them all.
+	back.calls = nil
+	back.fail = map[string]error{"addable " + other + "/Projects/y": errors.New(other + "/Projects/y is already added")}
+	m.browse(filepath.Join(other, "Projects"), "x")
+	m = keys(t, m, " ", " ", "a")
+	if !strings.Contains(asks(m), "Cannot add 1 of the 2 marked directories") || !strings.Contains(asks(m), "is already added") || len(back.calls) != 0 {
+		t.Errorf("unexpected box: %s", asks(m))
 	}
 }

@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -74,6 +75,8 @@ type Model struct {
 	br     browser
 	byDir  map[string]*app.FolderState // the folders on this client, by directory
 	rootAt map[string]string           // the roots on this client, by directory
+
+	marks map[string]bool // the marked folders of the folder list, by name
 
 	rows   []row
 	sel    int // selected row of the folder list
@@ -158,6 +161,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.load()
 			}
 			return m, nil
+		case key == "esc":
+			m.unmark()
+			return m, nil
+		case key == " " && m.focus == folders:
+			m.mark()
+			return m, nil
 		case m.view == files:
 			if m.browserKey(key) {
 				return m, nil
@@ -227,6 +236,14 @@ func (m *Model) setWorld(w app.World) {
 	}
 	if m.sel == 0 && len(m.rows) > 1 && before.name() == "" {
 		m.sel = 1 // the first folder, not its root
+	}
+	if len(m.marks) > 0 {
+		m.marks = cloned(m.marks)
+		for name := range m.marks {
+			if !slices.ContainsFunc(m.rows, func(r row) bool { return r.folder != nil && r.name() == name }) {
+				delete(m.marks, name) // the folder is gone
+			}
+		}
 	}
 	if m.view == files {
 		// The directory may have changed too, and so may what is tracked.

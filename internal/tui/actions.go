@@ -26,6 +26,9 @@ type action struct {
 // are offered in the bottom line, and only these do anything.
 func (m Model) actions() []action {
 	r := m.selected()
+	if k := m.marked(); k.any() && m.focus == folders {
+		return m.markedActions(k)
+	}
 	if m.view == files {
 		e, ok := m.entry()
 		switch {
@@ -389,30 +392,33 @@ func (m Model) add() (tea.Model, tea.Cmd) {
 		choices: candidates,
 		labels:  labels,
 		done: func(m Model, rootDir string) (tea.Model, tea.Cmd) {
-			if name, ok := m.back.RootAt(rootDir); ok {
+			return m.nameRoot(rootDir, filepath.Base(rootDir), func(m Model, name string) (tea.Model, tea.Cmd) {
 				return m.askAdd(dir, name, rootDir)
-			}
-			return m.nameRoot(dir, rootDir, filepath.Base(rootDir))
+			})
 		},
 	}
 	return m, nil
 }
 
-// nameRoot goes on with name for a new root, asking for another while the
+// nameRoot goes on with what the root at rootDir is called: its name if
+// this client knows it, else the suggested one, asking for another while a
 // name cannot be used.
-func (m Model) nameRoot(dir, rootDir, name string) (tea.Model, tea.Cmd) {
-	problem := m.back.CheckRootName(name)
+func (m Model) nameRoot(rootDir, suggested string, then func(Model, string) (tea.Model, tea.Cmd)) (tea.Model, tea.Cmd) {
+	if name, ok := m.back.RootAt(rootDir); ok {
+		return then(m, name)
+	}
+	problem := m.back.CheckRootName(suggested)
 	if problem == "" {
-		return m.askAdd(dir, name, rootDir)
+		return then(m, suggested)
 	}
 	m.dialog = &dialog{
 		title:   "Name for the root " + short(rootDir) + "?",
 		text:    "Other clients know the root by this name.",
 		typing:  true,
-		typed:   name,
+		typed:   suggested,
 		problem: problem,
 		done: func(m Model, typed string) (tea.Model, tea.Cmd) {
-			return m.nameRoot(dir, rootDir, typed)
+			return m.nameRoot(rootDir, typed, then)
 		},
 	}
 	return m, nil

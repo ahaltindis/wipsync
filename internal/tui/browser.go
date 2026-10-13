@@ -22,7 +22,8 @@ type browser struct {
 	err     error // why dir could not be read
 	sel     int
 	top     int
-	hidden  bool // whether names starting with a dot are shown
+	hidden  bool            // whether names starting with a dot are shown
+	marks   map[string]bool // the marked directories, by path; they stay marked while moving around
 
 	// What the right pane shows for a plain directory: its contents.
 	preview    []entry
@@ -241,6 +242,10 @@ func (m Model) entryLine(dir string, e entry, w int, selected bool) string {
 	if e.dir {
 		name += "/"
 	}
+	isMarked := m.view == files && m.br.marks[path]
+	if isMarked {
+		name = markSign + e.name + "/"
+	}
 	// What the directory is to wipsync, and for a folder what is due.
 	folder, root := m.kind(path)
 	word, colour := "", ""
@@ -266,6 +271,9 @@ func (m Model) entryLine(dir string, e entry, w int, selected bool) string {
 		return m.selection(folders).Render(text)
 	}
 	line := m.entryStyle(path, e).Render(cut(name, room))
+	if isMarked {
+		line = fg(m.theme.Marked).Bold(true).Render(markSign) + m.entryStyle(path, e).Render(cut(name[len(markSign):], room-1))
+	}
 	if word != "" {
 		line += " " + fg(colour).Render(word) + " "
 	}

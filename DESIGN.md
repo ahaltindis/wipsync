@@ -68,7 +68,8 @@ Compared per file against the common base snapshot:
 - **TUI**: `wipsync tui`, in the same binary, built with Bubble Tea. Folders under their roots on
   the left, coloured by what is due (snapshot, push, pull); the selected folder's snapshots on the
   right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest;
-on a root, everything under it), `r` restore. Pull and restore ask first. `Tab` turns the left pane
+on a root, everything under it), `r` restore. Pull and restore ask first. Space marks lines, and
+  the keys then act on everything marked. `Tab` turns the left pane
   into a directory browser, where roots, tracked folders, other directories and files each have
   their colour, and `a` adds the selected directory. Colours come from `theme.toml` beside the
   config.
