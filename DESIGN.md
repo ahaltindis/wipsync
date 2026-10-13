@@ -111,7 +111,9 @@ restic 0.19.1, warm cache. Local disk, and over ssh to a server 7 ms away. One f
 Still to verify:
 
 1. With a cold cache, on a much larger folder, and over a slow link.
-2. Pruning while clients write (it takes an exclusive lock).
+2. Pruning while clients write (it takes an exclusive lock). A killed restic leaves its lock
+   behind: snapshots ignore it, pruning refuses to start. So pruning runs `restic unlock` first,
+   which removes only locks older than 30 minutes or from a process that is gone.
 3. Changing an ignore rule after snapshots exist.
 
 Fallback: rsync over ssh with hard-link snapshots on the server.

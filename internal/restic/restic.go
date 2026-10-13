@@ -12,9 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const binary = "restic"
+
+// interruptGrace is how long restic gets to finish after an interrupt, to
+// remove its lock from the repository, before it is killed.
+const interruptGrace = 30 * time.Second
 
 // MinVersion is the oldest restic that has backup --skip-if-unchanged and
 // restore --delete (0.17.0), and its own exit code for a wrong password
@@ -92,6 +97,10 @@ type Client struct {
 
 func (c *Client) run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
+	// When the context ends, interrupt restic and let it clean up. The
+	// default is to kill it, which leaves its lock in the repository.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = interruptGrace
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "RESTIC_REPOSITORY="+c.Repository)
 	if c.PasswordFile != "" {
