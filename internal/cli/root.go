@@ -15,7 +15,7 @@ func Root() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().String("config", "", "config file (default ~/.config/wipsync/config.toml)")
-	root.AddCommand(addCmd())
+	root.AddCommand(initCmd(), addCmd(), snapshotCmd(), doctorCmd())
 	return root
 }
 
@@ -30,5 +30,8 @@ func loadConfig(cmd *cobra.Command) (string, *config.Config, error) {
 		}
 	}
 	cfg, err := config.Load(path)
-	return path, cfg, err
+	if err != nil {
+		return "", nil, err
+	}
+	return cfg.Path, cfg, nil
 }

@@ -22,6 +22,7 @@ func TestLoadMissingFile(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "config.toml")
 	want := &Config{
+		Path:            path,
 		Client:          "laptop",
 		Repository:      "sftp:user@host:/repo",
 		PasswordCommand: "secret-tool lookup service wipsync",
@@ -56,6 +57,39 @@ func TestDirAndFolderAt(t *testing.T) {
 	}
 	if _, ok := c.FolderAt("/home/u/Projects/Freelance"); ok {
 		t.Error("FolderAt matched a parent directory")
+	}
+}
+
+func TestFolderContaining(t *testing.T) {
+	c := &Config{
+		Roots:   map[string]string{"Projects": "/home/u/Projects"},
+		Folders: []Folder{{Root: "Projects", Path: "app"}},
+	}
+	for _, dir := range []string{"/home/u/Projects/app", "/home/u/Projects/app/src/deep"} {
+		if f, ok := c.FolderContaining(dir); !ok || f.Path != "app" {
+			t.Errorf("FolderContaining(%q) = %+v, %v", dir, f, ok)
+		}
+	}
+	for _, dir := range []string{"/home/u/Projects", "/home/u/Projects/app2"} {
+		if _, ok := c.FolderContaining(dir); ok {
+			t.Errorf("FolderContaining(%q) matched", dir)
+		}
+	}
+}
+
+func TestPasswordFilePath(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	cases := map[string]string{
+		"~/.config/wipsync/password": "/home/u/.config/wipsync/password",
+		"/etc/wipsync/password":      "/etc/wipsync/password",
+		"password":                   "/conf/dir/password",
+		"keys/password":              "/conf/dir/keys/password",
+		"":                           "",
+	}
+	for in, want := range cases {
+		if got := (&Config{Path: "/conf/dir/config.toml", PasswordFile: in}).PasswordFilePath(); got != want {
+			t.Errorf("PasswordFilePath(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

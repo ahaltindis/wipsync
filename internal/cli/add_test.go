@@ -22,6 +22,8 @@ func newEnv(t *testing.T) *env {
 	base := t.TempDir()
 	e := &env{t: t, home: filepath.Join(base, "home"), cfg: filepath.Join(base, "config.toml")}
 	t.Setenv("HOME", e.home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	return e
 }
 
@@ -198,6 +200,17 @@ func TestAddOverlap(t *testing.T) {
 	}
 	if n := len(e.config().Folders); n != 2 {
 		t.Errorf("%d folders, want 2", n)
+	}
+}
+
+func TestAddCommaInPath(t *testing.T) {
+	e := newEnv(t)
+	_, err := e.run("", "add", e.mkdir("Projects/a,b"))
+	if err == nil || !strings.Contains(err.Error(), "comma") {
+		t.Errorf("err = %v", err)
+	}
+	if n := len(e.config().Folders); n != 0 {
+		t.Errorf("%d folders, want 0", n)
 	}
 }
 

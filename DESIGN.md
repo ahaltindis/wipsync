@@ -49,8 +49,8 @@ Compared per file against the common base snapshot:
 - **Server**: storage reached over ssh, plus the same CLI run over ssh for what must be atomic: the
   push check. No daemon; one can be added later if needed.
 - **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
-  CLI: `add`, `status`, `log`, `diff`, `push`, `pull`, `restore`. Written in Go with cobra, one
-  binary for both sides.
+  CLI: `init`, `add`, `snapshot`, `status`, `log`, `diff`, `push`, `pull`, `restore`, and `doctor`
+  to check the setup. Written in Go with cobra, one binary for both sides.
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to
   restic as is.
@@ -64,6 +64,9 @@ Compared per file against the common base snapshot:
 
 Don't write the file transfer. **restic** does it: atomic snapshots per host, deduplication across
 clients, diff, restore, pruning, encrypted on the server, only needs ssh.
+
+wipsync runs the restic binary, 0.17.1 or newer. restic can't be used as a Go library: its packages
+are all internal.
 
 How wipsync uses it:
 

@@ -1,12 +1,9 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -51,12 +48,16 @@ client maps it to its own location.`,
 				return fmt.Errorf("%s overlaps %s, which is already added; a synced folder cannot be inside another", dir, f)
 			}
 
-			p := &prompter{in: cmd.InOrStdin(), out: cmd.OutOrStdout()}
+			p := newPrompter(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 			name, rootDir, err := resolveRoot(p, cfg, dir, rootFlag, nameFlag)
 			if err != nil {
 				return err
 			}
 			rel, _ := config.Within(rootDir, dir)
+			// The path becomes a restic tag, and restic separates tags with commas.
+			if strings.Contains(rel, ",") {
+				return fmt.Errorf("%s has a comma in its path, which wipsync cannot sync", dir)
+			}
 
 			f := config.Folder{Root: name, Path: rel, Ignore: config.DefaultIgnore}
 			cfg.Roots[name] = rootDir
@@ -147,54 +148,13 @@ func rootCandidates(dir string) []string {
 	return out
 }
 
-type prompter struct {
-	in  io.Reader
-	out io.Writer
-	r   *bufio.Reader
-}
-
-// interactive reports whether there is someone to answer a question. Input
-// that is not a file was set by the caller, so it counts.
-func (p *prompter) interactive() bool {
-	f, ok := p.in.(*os.File)
-	if !ok {
-		return true
-	}
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func (p *prompter) ask(question string) (string, error) {
-	if p.r == nil {
-		p.r = bufio.NewReader(p.in)
-	}
-	fmt.Fprint(p.out, question)
-	line, err := p.r.ReadString('\n')
-	if err != nil && line == "" {
-		return "", fmt.Errorf("no answer: %w", err)
-	}
-	return strings.TrimSpace(line), nil
-}
-
 func (p *prompter) chooseRoot(candidates []string) (string, error) {
 	if len(candidates) == 1 {
 		return candidates[0], nil
 	}
-	fmt.Fprintln(p.out, "Which parent is the root? Each client maps it to its own location.")
-	for i, c := range candidates {
-		fmt.Fprintf(p.out, "  %d) %s\n", i+1, c)
+	n, err := p.choose("Which parent is the root? Each client maps it to its own location.", "Root", candidates)
+	if err != nil {
+		return "", err
 	}
-	for {
-		answer, err := p.ask("Root [1]: ")
-		if err != nil {
-			return "", err
-		}
-		if answer == "" {
-			return candidates[0], nil
-		}
-		if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(candidates) {
-			return candidates[n-1], nil
-		}
-		fmt.Fprintf(p.out, "Enter a number from 1 to %d.\n", len(candidates))
-	}
+	return candidates[n], nil
 }

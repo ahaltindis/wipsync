@@ -16,6 +16,9 @@ import (
 var DefaultIgnore = []string{"node_modules", ".venv", "venv", "__pycache__"}
 
 type Config struct {
+	// Path is the absolute path of the file the config was loaded from.
+	Path string `toml:"-"`
+
 	Client          string `toml:"client"`
 	Repository      string `toml:"repository"`
 	PasswordFile    string `toml:"password_file,omitempty"`
@@ -48,7 +51,11 @@ func DefaultPath() (string, error) {
 
 // Load reads the config at path. A missing file gives an empty config.
 func Load(path string) (*Config, error) {
-	c := &Config{}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	c := &Config{Path: path}
 	if _, err := toml.DecodeFile(path, c); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
@@ -99,6 +106,31 @@ func (c *Config) FolderAt(dir string) (Folder, bool) {
 		}
 	}
 	return Folder{}, false
+}
+
+// FolderContaining returns the folder that dir is, or is inside.
+func (c *Config) FolderContaining(dir string) (Folder, bool) {
+	for _, f := range c.Folders {
+		loc := c.Dir(f)
+		if _, ok := Within(loc, dir); ok || loc == dir {
+			return f, true
+		}
+	}
+	return Folder{}, false
+}
+
+// PasswordFilePath returns where password_file points. A leading ~/ is the
+// home directory, and a relative path starts at the config's directory.
+func (c *Config) PasswordFilePath() string {
+	if rest, ok := strings.CutPrefix(c.PasswordFile, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	if c.PasswordFile == "" || filepath.IsAbs(c.PasswordFile) {
+		return c.PasswordFile
+	}
+	return filepath.Join(filepath.Dir(c.Path), c.PasswordFile)
 }
 
 // Overlap returns an added folder that dir is inside, or that is inside dir.
