@@ -179,6 +179,6 @@ func (p *prompter) newPassword() (string, error) {
 }
 
 var (
-	errNoTerminal  = errors.New("this command asks questions and needs a terminal")
+	errNoTerminal  = errors.New("this command needs a terminal")
 	errInterrupted = errors.New("interrupted")
 )

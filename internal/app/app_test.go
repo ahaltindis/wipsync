@@ -1,8 +1,11 @@
 package app
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
 func TestDescends(t *testing.T) {
@@ -77,5 +80,43 @@ func TestSplitName(t *testing.T) {
 		if _, _, ok := SplitName(in); ok {
 			t.Errorf("SplitName(%q) was accepted", in)
 		}
+	}
+}
+
+func TestStatus(t *testing.T) {
+	// a <- b <- c on one line, and a <- x on another.
+	snaps := []restic.Snapshot{{ID: "a"}, {ID: "b", Parent: "a"}, {ID: "c", Parent: "b"}, {ID: "x", Parent: "a"}}
+	cases := []struct {
+		name         string
+		base, master string
+		changed      bool
+		want         Status
+	}{
+		{"never snapshotted", "", "a", false, Changed},
+		{"at master", "b", "b", false, InStep},
+		{"at master, edited", "b", "b", true, Changed},
+		{"master moved on", "a", "c", false, Behind},
+		{"master moved on, edited", "a", "c", true, Diverged},
+		{"has more than master", "c", "a", false, Ahead},
+		{"has more than master, edited", "c", "a", true, Changed},
+		{"different lines", "c", "x", false, Diverged},
+		{"no master yet", "b", "", false, Ahead},
+		{"no master yet, edited", "b", "", true, Changed},
+		{"master is not one of the snapshots", "b", "gone", false, Ahead},
+	}
+	for _, tc := range cases {
+		got := status(FolderState{Snapshots: snaps, Base: tc.base, Master: tc.master, Changed: tc.changed})
+		if got != tc.want {
+			t.Errorf("%s: status = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCompare(t *testing.T) {
+	names := []string{"notes", "aha/wipsync", "Freelance/kadir", "aha/archype", "Aha/x", "aha/Archype"}
+	slices.SortFunc(names, compare)
+	want := []string{"aha/Archype", "aha/archype", "aha/wipsync", "Aha/x", "Freelance/kadir", "notes"}
+	if !slices.Equal(names, want) {
+		t.Errorf("sorted = %v, want %v", names, want)
 	}
 }
