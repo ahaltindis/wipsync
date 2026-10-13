@@ -4,6 +4,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
 )
 
@@ -38,4 +39,23 @@ func loadConfig(cmd *cobra.Command) (string, *config.Config, error) {
 		return "", nil, err
 	}
 	return cfg.Path, cfg, nil
+}
+
+// open loads the client the command runs as.
+func open(cmd *cobra.Command) (*app.App, error) {
+	path, err := cmd.Flags().GetString("config")
+	if err != nil {
+		return nil, err
+	}
+	return app.Open(path)
+}
+
+// folderArg finds the folder a command is about: the one named by its
+// optional argument at position i, or the one the current directory is in.
+func folderArg(a *app.App, args []string, i int) (config.Folder, error) {
+	arg := ""
+	if len(args) > i {
+		arg = args[i]
+	}
+	return a.Folder(arg)
 }

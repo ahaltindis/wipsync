@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
 	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
@@ -101,7 +102,7 @@ func (r *report) restic(ctx context.Context) bool {
 func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bool) {
 	ready := resticOK
 
-	if err := checkRepository(cfg); err != nil {
+	if err := app.CheckRepository(cfg); err != nil {
 		r.fail("repository: %v", err)
 		ready = false
 	} else if strings.HasPrefix(cfg.Repository, "sftp:") {
@@ -111,7 +112,7 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 		}
 	}
 
-	if err := checkPassword(cfg); err != nil {
+	if err := app.CheckPassword(cfg); err != nil {
 		r.fail("password: %v", err)
 		ready = false
 	} else if cfg.PasswordFile != "" {
@@ -132,7 +133,7 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 		r.skip("repository access: needs the checks above to pass")
 		return
 	}
-	client, _ := resticClient(cfg.Path, cfg)
+	client, _ := (&app.App{ConfigPath: cfg.Path, Config: cfg}).Client()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx); err != nil {

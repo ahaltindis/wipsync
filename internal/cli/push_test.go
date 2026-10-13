@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/state"
@@ -147,26 +146,5 @@ func TestPushUnsupportedRepository(t *testing.T) {
 	_, err := e.run("", "push", dir)
 	if err == nil || !strings.Contains(err.Error(), "not rest:") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-func TestAge(t *testing.T) {
-	cases := map[string]string{
-		"20s":   "just now",
-		"1m30s": "1 minute ago",
-		"59m":   "59 minutes ago",
-		"1h":    "1 hour ago",
-		"47h":   "47 hours ago",
-		"48h":   "2 days ago",
-		"240h":  "10 days ago",
-	}
-	for in, want := range cases {
-		d, err := time.ParseDuration(in)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := age(d); got != want {
-			t.Errorf("age(%s) = %q, want %q", in, got, want)
-		}
 	}
 }

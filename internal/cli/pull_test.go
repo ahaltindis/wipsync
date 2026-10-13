@@ -584,31 +584,3 @@ func TestPullAdoptsIgnoreRules(t *testing.T) {
 		t.Errorf("main.py = %q", got)
 	}
 }
-
-func TestDescends(t *testing.T) {
-	// a <- b <- c, and a <- x; y stands alone.
-	parents := map[string]string{"a": "", "b": "a", "c": "b", "x": "a", "y": "gone"}
-	for _, tc := range []struct {
-		id, ancestor string
-		want         bool
-	}{
-		{"c", "a", true}, {"c", "b", true}, {"b", "c", false}, {"c", "c", false},
-		{"x", "b", false}, {"y", "a", false}, {"a", "", false},
-	} {
-		if got := descends(parents, tc.id, tc.ancestor); got != tc.want {
-			t.Errorf("descends(%s, %s) = %v", tc.id, tc.ancestor, got)
-		}
-	}
-	for _, tc := range []struct{ a, b, want string }{
-		{"c", "x", "a"}, {"c", "b", "b"}, {"x", "x", "x"}, {"c", "y", ""},
-	} {
-		if got := commonAncestor(parents, tc.a, tc.b); got != tc.want {
-			t.Errorf("commonAncestor(%s, %s) = %q, want %q", tc.a, tc.b, got, tc.want)
-		}
-	}
-	// A loop in the links must not hang.
-	loop := map[string]string{"p": "q", "q": "p"}
-	if descends(loop, "p", "z") || commonAncestor(loop, "p", "z") != "" {
-		t.Error("a loop was not handled")
-	}
-}

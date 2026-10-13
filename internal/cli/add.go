@@ -2,12 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
 )
 
@@ -31,38 +30,20 @@ client maps it to its own location.`,
 			if err != nil {
 				return err
 			}
-			if info, err := os.Stat(dir); err != nil {
-				return err
-			} else if !info.IsDir() {
-				return fmt.Errorf("%s is not a directory", dir)
-			}
-
-			cfgPath, cfg, err := loadConfig(cmd)
+			a, err := open(cmd)
 			if err != nil {
 				return err
 			}
-			if f, ok := cfg.FolderAt(dir); ok {
-				return fmt.Errorf("%s is already added as %s", dir, f)
+			if err := a.CheckAddable(dir); err != nil {
+				return err
 			}
-			if f, ok := cfg.Overlap(dir); ok {
-				return fmt.Errorf("%s overlaps %s, which is already added; a synced folder cannot be inside another", dir, f)
-			}
-
 			p := newPrompter(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
-			name, rootDir, err := resolveRoot(p, cfg, dir, rootFlag, nameFlag)
+			name, rootDir, err := resolveRoot(p, a, dir, rootFlag, nameFlag)
 			if err != nil {
 				return err
 			}
-			rel, _ := config.Within(rootDir, dir)
-			// The path becomes a restic tag, and restic separates tags with commas.
-			if strings.Contains(rel, ",") {
-				return fmt.Errorf("%s has a comma in its path, which wipsync cannot sync", dir)
-			}
-
-			f := config.Folder{Root: name, Path: rel, Ignore: config.DefaultIgnore}
-			cfg.Roots[name] = rootDir
-			cfg.Folders = append(cfg.Folders, f)
-			if err := cfg.Save(cfgPath); err != nil {
+			f, err := a.Add(dir, name, rootDir)
+			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "added %s (root %s = %s)\n", f, name, rootDir)
@@ -74,8 +55,10 @@ client maps it to its own location.`,
 	return cmd
 }
 
-// resolveRoot decides which parent of dir is its root, and what it is called.
-func resolveRoot(p *prompter, cfg *config.Config, dir, rootFlag, nameFlag string) (name, rootDir string, err error) {
+// resolveRoot decides which parent of dir is its root, and what it is
+// called, asking when that cannot be told.
+func resolveRoot(p *prompter, a *app.App, dir, rootFlag, nameFlag string) (name, rootDir string, err error) {
+	cfg := a.Config
 	if rootFlag != "" {
 		if rootDir, err = filepath.Abs(rootFlag); err != nil {
 			return "", "", err
@@ -86,7 +69,7 @@ func resolveRoot(p *prompter, cfg *config.Config, dir, rootFlag, nameFlag string
 	} else if name, ok := cfg.RootAbove(dir); ok {
 		return name, cfg.Roots[name], nil
 	} else {
-		candidates := rootCandidates(dir)
+		candidates := app.RootCandidates(dir)
 		if len(candidates) > 1 && !p.interactive() {
 			return "", "", fmt.Errorf("cannot tell which parent of %s is its root; pass --root", dir)
 		}
@@ -103,7 +86,7 @@ func resolveRoot(p *prompter, cfg *config.Config, dir, rootFlag, nameFlag string
 		name = filepath.Base(rootDir)
 	}
 	for {
-		problem := checkRootName(cfg, name)
+		problem := a.CheckRootName(name)
 		if problem == "" {
 			return name, rootDir, nil
 		}
@@ -115,37 +98,6 @@ func resolveRoot(p *prompter, cfg *config.Config, dir, rootFlag, nameFlag string
 			return "", "", err
 		}
 	}
-}
-
-// checkRootName returns why name cannot be used for a new root, or "".
-func checkRootName(cfg *config.Config, name string) string {
-	// The name becomes a restic tag, and restic separates tags with commas.
-	if name == "" || strings.ContainsAny(name, "/,") {
-		return fmt.Sprintf("%q is not a usable root name", name)
-	}
-	if loc, taken := cfg.Roots[name]; taken {
-		return fmt.Sprintf("root name %q is already used for %s", name, loc)
-	}
-	return ""
-}
-
-// rootCandidates lists the parents of dir, highest first. Inside the home
-// directory it stops below home.
-func rootCandidates(dir string) []string {
-	stop := string(filepath.Separator)
-	if home, err := os.UserHomeDir(); err == nil {
-		if _, ok := config.Within(home, dir); ok {
-			stop = home
-		}
-	}
-	var out []string
-	for p := filepath.Dir(dir); p != stop && p != filepath.Dir(p); p = filepath.Dir(p) {
-		out = append([]string{p}, out...)
-	}
-	if len(out) == 0 {
-		out = []string{filepath.Dir(dir)}
-	}
-	return out
 }
 
 func (p *prompter) chooseRoot(candidates []string) (string, error) {
