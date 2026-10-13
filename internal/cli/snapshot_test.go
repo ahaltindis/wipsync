@@ -219,3 +219,65 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("err = %v\n%s", err, out)
 	}
 }
+
+func TestLog(t *testing.T) {
+	e := newEnv(t)
+	e.repo()
+	app := filepath.Join(e.home, "Projects/app")
+	other := filepath.Join(e.home, "Projects/other")
+	e.write("Projects/app/a.txt", "one\n")
+	e.write("Projects/other/b.txt", "other\n")
+	for _, dir := range []string{app, other} {
+		if out, err := e.run("", "add", dir); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+	}
+
+	out, err := e.run("", "log", app)
+	if err != nil || out != "Projects/app: no snapshots yet\n" {
+		t.Errorf("err = %v\n%s", err, out)
+	}
+
+	// Two snapshots of app from this client, one from another client, and
+	// one of a different folder.
+	snap := func(dir string) {
+		t.Helper()
+		if out, err := e.run("", "snapshot", dir); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+	}
+	snap(app)
+	e.write("Projects/app/a.txt", "two!\n")
+	snap(app)
+	snap(other)
+	c := e.config()
+	c.Client = "client-b"
+	if err := c.Save(e.cfg); err != nil {
+		t.Fatal(err)
+	}
+	e.write("Projects/app/a.txt", "three\n")
+	snap(app)
+
+	out, err = e.run("", "log", app)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 4 || lines[0] != "Projects/app" {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	// Newest first: client-b's, which is also the base, then client-a's two.
+	if f := strings.Fields(lines[1]); len(f) != 5 || f[3] != "client-b" || f[4] != "base" {
+		t.Errorf("line 1 = %q", lines[1])
+	}
+	for _, line := range lines[2:] {
+		if f := strings.Fields(line); len(f) != 4 || f[3] != "client-a" {
+			t.Errorf("line = %q", line)
+		}
+	}
+
+	out, err = e.run("", "log", "-n", "1", "Projects/app")
+	if err != nil || !strings.Contains(out, "client-b") || strings.Contains(out, "client-a") || !strings.Contains(out, "2 older not shown") {
+		t.Errorf("err = %v\n%s", err, out)
+	}
+}

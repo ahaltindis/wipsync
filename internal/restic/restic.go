@@ -219,3 +219,28 @@ func (c *Client) Backup(ctx context.Context, o BackupOptions) (BackupResult, err
 		BytesStored:  m.DataAddedPacked,
 	}, nil
 }
+
+type Snapshot struct {
+	ID     string    `json:"id"`
+	Parent string    `json:"parent"`
+	Time   time.Time `json:"time"`
+	Host   string    `json:"hostname"`
+	Tags   []string  `json:"tags"`
+}
+
+// Snapshots lists the snapshots that carry all the given tags, oldest first.
+func (c *Client) Snapshots(ctx context.Context, tags []string) ([]Snapshot, error) {
+	args := []string{"snapshots", "--json"}
+	if len(tags) > 0 {
+		args = append(args, "--tag", strings.Join(tags, ","))
+	}
+	out, err := c.run(ctx, "", args...)
+	if err != nil {
+		return nil, err
+	}
+	var list []Snapshot
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("restic snapshots: %w", err)
+	}
+	return list, nil
+}
