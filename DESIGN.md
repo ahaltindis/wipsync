@@ -7,7 +7,10 @@ Status: design, plus a local prototype of the engine (see Engine). No client or 
 
 ## Model
 
-- A **folder** is added on each client with the same path. It doesn't have to be a git repo.
+- A **folder** is known to all clients by its **root** and its path under it, for example `Projects`
+  and `Freelance/kadir/boxing-machine`. The root is the highest parent directory, and each client
+  maps it to its own location. A folder doesn't have to be a git repo, and can't be inside another
+  synced folder.
 - A **snapshot** is the complete state of a folder at one moment. It records its client and its
   **parent**: the snapshot the folder was based on.
 - **WIP**: each client snapshots its folders to the server automatically after local changes. A client
@@ -46,10 +49,15 @@ Compared per file against the common base snapshot:
 - **Server**: storage reached over ssh, plus the same CLI run over ssh for what must be atomic: the
   push check. No daemon; one can be added later if needed.
 - **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
-  CLI: `add`, `status`, `log`, `diff`, `push`, `pull`, `restore`. Written in Go, one binary for both
-  sides.
+  CLI: `add`, `status`, `log`, `diff`, `push`, `pull`, `restore`. Written in Go with cobra, one
+  binary for both sides.
+- **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
+  and where the repository password comes from: `password_file` or `password_command`, handed to
+  restic as is.
+- **State**: `~/.local/state/wipsync/` holds, per folder, the snapshot it is based on. Not inside the
+  folder, where a pull would overwrite it.
 - **Log**: what was sent and when, per folder.
-- **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, build output).
+- **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, `__pycache__`).
 - Later: waybar indicator, vicinae command.
 
 ## Engine
@@ -62,6 +70,8 @@ How wipsync uses it:
 - Snapshot: from inside the folder, `backup . --host <client> --parent <base> --skip-if-unchanged`,
   with the folder's ignore rules. With an absolute path the snapshot includes the directories above
   the folder, and a change beside the folder makes a new snapshot.
+- One repository for all folders. A snapshot is tagged with its folder when it is created:
+  `root=Projects`, `path=Freelance/kadir/boxing-machine`.
 - Parent: always passed with `--parent`, also when it is another client's snapshot. restic's own
   choice goes by host and path only.
 - Restore: `restore <id> --target <folder> --delete`, with the same ignore rules. The folder's own
@@ -106,7 +116,8 @@ Fallback: rsync over ssh with hard-link snapshots on the server.
 ## Packaging
 
 Own repo, released to the AUR. Archype only installs and configures it. Pairing a client with the
-server is a manual one-time step.
+server is a manual one-time step. Each client gets its own repository password, so one client can be
+removed without touching the others.
 
 ## Open
 
