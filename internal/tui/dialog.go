@@ -17,6 +17,7 @@ type dialog struct {
 
 	menu    []option // each chosen by its own key
 	choices []string // chosen with j, k and enter
+	labels  []string // how the choices are shown, if not as they are
 	sel     int
 	typing  bool   // a line is being typed
 	typed   string // what was typed so far
@@ -137,6 +138,9 @@ func (d *dialog) box(m Model, width int) []string {
 	case d.choices != nil:
 		body = append(body, "")
 		for i, c := range d.choices {
+			if d.labels != nil {
+				c = d.labels[i]
+			}
 			line := "  " + ansi.Truncate(c, inner-2, "…")
 			if i == d.sel {
 				line = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.theme.SelectedText)).

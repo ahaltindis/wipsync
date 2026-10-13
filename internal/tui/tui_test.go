@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -100,6 +101,41 @@ func (f *fake) RootDir(root string) (string, bool) {
 
 func (f *fake) CheckNewRoot(root, dir string) error {
 	return f.fail["root "+root+" at "+dir]
+}
+
+func (f *fake) Roots() map[string]string { return f.roots }
+
+func (f *fake) CheckAddable(dir string) error { return f.fail["addable "+dir] }
+
+func (f *fake) RootAbove(dir string) (string, string, bool) {
+	for name, rootDir := range f.roots {
+		if strings.HasPrefix(dir, rootDir+"/") {
+			return name, rootDir, true
+		}
+	}
+	return "", "", false
+}
+
+func (f *fake) RootAt(dir string) (string, bool) {
+	for name, rootDir := range f.roots {
+		if rootDir == dir {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func (f *fake) CheckRootName(name string) string {
+	if _, taken := f.roots[name]; taken {
+		return fmt.Sprintf("root name %q is already used for %s", name, f.roots[name])
+	}
+	return ""
+}
+
+func (f *fake) Add(dir, rootName, rootDir string) (config.Folder, error) {
+	err := f.did("add " + dir + " as " + rootName + " at " + rootDir)
+	rel, _ := filepath.Rel(rootDir, dir)
+	return config.Folder{Root: rootName, Path: rel}, err
 }
 
 // started returns a model that has its size and has read the sample world.
@@ -201,7 +237,7 @@ func TestScreen(t *testing.T) {
 		"/home/u/Projects/aha/archype",
 		"in step with master",
 		"b1b1b1b1  2026-10-13 10:30  desktop    master  base",
-		"j/k move  l log    s snapshot  P push  p pull  r restore    R refresh  q quit",
+		"j/k move  l log    s snapshot  P push  p pull  r restore    tab browse  R refresh  q quit",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -293,10 +329,10 @@ func TestHints(t *testing.T) {
 		typed []string
 		want  string
 	}{
-		{"a folder that is here", nil, "j/k move  l log    s snapshot  P push  p pull  r restore    R refresh  q quit"},
-		{"a folder that is not here", []string{"j"}, "j/k move  l log    p pull    R refresh  q quit"},
-		{"a root", []string{"g"}, "j/k move    p pull all    R refresh  q quit"},
-		{"a snapshot in the log", []string{"j", "l"}, "j/k move  h folders    r restore this snapshot    R refresh  q quit"},
+		{"a folder that is here", nil, "j/k move  l log    s snapshot  P push  p pull  r restore    tab browse  R refresh  q quit"},
+		{"a folder that is not here", []string{"j"}, "j/k move  l log    p pull    tab browse  R refresh  q quit"},
+		{"a root", []string{"g"}, "j/k move    p pull all    tab browse  R refresh  q quit"},
+		{"a snapshot in the log", []string{"j", "l"}, "j/k move  h folders    r restore this snapshot    tab browse  R refresh  q quit"},
 	}
 	for _, tc := range cases {
 		m = keys(t, m, tc.typed...)
@@ -658,5 +694,268 @@ func TestTheme(t *testing.T) {
 	}
 	if _, err := LoadTheme(path); err == nil {
 		t.Error("a broken theme file was accepted")
+	}
+}
+
+// browsing returns a model over a small home directory, some of it tracked.
+//
+//	~/Projects            root Projects
+//	  aha/archype         tracked, in step
+//	  aha/wipsync         tracked, behind
+//	  new-thing/README.md
+//	  .cache/
+//	~/notes/journal       root notes; tracked, ahead
+//	~/other/Projects/x
+//	~/todo.txt
+func browsing(t *testing.T) (Model, *fake, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{"Projects/aha/archype/src", "Projects/aha/wipsync", "Projects/new-thing", "Projects/.cache", "notes/journal", "other/Projects/x"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"Projects/new-thing/README.md", "todo.txt"} {
+		if err := os.WriteFile(filepath.Join(home, file), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b1 := snap("b1", "", "desktop", 90)
+	folder := func(root, path string, s app.Status) app.FolderState {
+		return app.FolderState{Folder: config.Folder{Root: root, Path: path}, Dir: filepath.Join(home, root, path),
+			Status: s, Base: b1.ID, Master: b1.ID, Snapshots: []restic.Snapshot{b1}}
+	}
+	back := &fake{
+		world: app.World{Folders: []app.FolderState{
+			folder("Projects", "aha/archype", app.InStep),
+			folder("Projects", "aha/wipsync", app.Behind),
+			folder("notes", "journal", app.Ahead),
+		}},
+		roots: map[string]string{"Projects": filepath.Join(home, "Projects"), "notes": filepath.Join(home, "notes")},
+	}
+	m := Model{client: "laptop", repository: "sftp:u@host:/srv/repo", theme: DefaultTheme(), loading: true, back: back}
+	return send(t, m, tea.WindowSizeMsg{Width: 110, Height: 18}, m.Init()()), back, home
+}
+
+func TestBrowser(t *testing.T) {
+	m, _, home := browsing(t)
+	m = keys(t, m, "tab")
+	screen := m.View()
+	t.Logf("the browser, opened beside the selected folder:\n%s", screen)
+	// It opens where the selected folder is, on that folder.
+	if m.view != files || m.br.dir != filepath.Join(home, "Projects/aha") || m.path() != filepath.Join(home, "Projects/aha/archype") {
+		t.Fatalf("opened at %q on %q", m.br.dir, m.path())
+	}
+	for _, want := range []string{
+		"wipsync  ~/Projects/aha",
+		" archype/", "tracked", " wipsync/", "behind",
+		// A tracked directory shows what the folder list would: its log.
+		"Projects/aha/archype", "in step with master", "b1b1b1b1",
+		"j/k move  h up  l open    s snapshot  P push  p pull    . hidden  tab folders  R refresh  q quit",
+	} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the screen lacks %q", want)
+		}
+	}
+
+	// Up a level: the directory we came from is selected, and previewed.
+	m = keys(t, m, "h")
+	screen = m.View()
+	t.Logf("one level up:\n%s", screen)
+	if m.br.dir != filepath.Join(home, "Projects") || m.path() != filepath.Join(home, "Projects/aha") {
+		t.Fatalf("after h: at %q on %q", m.br.dir, m.path())
+	}
+	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "j/k move  h up  l open    a add    . hidden"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the screen lacks %q", want)
+		}
+	}
+	if strings.Contains(screen, ".cache") {
+		t.Error("a hidden directory is shown")
+	}
+	if m = keys(t, m, "."); !strings.Contains(m.View(), " .cache/") || m.path() != filepath.Join(home, "Projects/aha") {
+		t.Errorf("the dot did not show hidden names, or moved the selection:\n%s", m.View())
+	}
+	m = keys(t, m, ".")
+
+	// Up again: the root is marked, and acts as one.
+	m = keys(t, m, "h")
+	screen = m.View()
+	if m.path() != filepath.Join(home, "Projects") || !strings.Contains(screen, " Projects/") || !strings.Contains(screen, "root") ||
+		!strings.Contains(screen, "2 folders") || !strings.Contains(screen, "p pull all") {
+		t.Errorf("the root is not shown as one:\n%s", screen)
+	}
+	// Directories come before files, each in order.
+	order := []string{" notes/", " other/", " Projects/", " todo.txt"}
+	at := 0
+	for _, name := range order {
+		i := strings.Index(screen[at:], name)
+		if i < 0 {
+			t.Fatalf("%q is missing or out of order:\n%s", name, screen)
+		}
+		at += i
+	}
+	// A file can be neither entered nor added.
+	m = keys(t, m, "G")
+	if m.path() != filepath.Join(home, "todo.txt") {
+		t.Fatalf("G went to %q", m.path())
+	}
+	if got := bottom(m); got != "j/k move  h up      . hidden  tab folders  R refresh  q quit" {
+		t.Errorf("bottom line on a file = %q", got)
+	}
+	if !strings.Contains(m.View(), "6 B, changed ") {
+		t.Errorf("a file's details are missing:\n%s", m.View())
+	}
+	if in := keys(t, m, "l", "a"); in.br.dir != home || in.dialog != nil {
+		t.Error("a file was entered or added")
+	}
+
+	// Into a directory and back; at the top, h stays.
+	m = keys(t, m, "g", "j", "l", "l")
+	if m.br.dir != filepath.Join(home, "other/Projects") || m.path() != filepath.Join(home, "other/Projects/x") {
+		t.Errorf("after l l: at %q on %q", m.br.dir, m.path())
+	}
+	m = keys(t, m, "l", "l") // x is empty
+	if m.br.dir != filepath.Join(home, "other/Projects/x") || !strings.Contains(m.View(), " empty") {
+		t.Errorf("an empty directory: at %q\n%s", m.br.dir, m.View())
+	}
+	for range 40 {
+		m = keys(t, m, "h")
+	}
+	if m.br.dir != "/" {
+		t.Errorf("h did not stop at the top: %q", m.br.dir)
+	}
+
+	// Back to the folders, where the selection is as it was left.
+	m = keys(t, m, "tab")
+	if m.view != tracked || m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("back in the folder list on %q", m.selected().name())
+	}
+	// And the browser remembers where it was.
+	if m = keys(t, m, "tab"); m.br.dir != "/" {
+		t.Errorf("the browser forgot its place: %q", m.br.dir)
+	}
+}
+
+func TestBrowserColours(t *testing.T) {
+	m, _, home := browsing(t)
+	m = keys(t, m, "tab")
+	theme := DefaultTheme()
+	cases := []struct {
+		path string
+		dir  bool
+		want string
+	}{
+		{"Projects", true, theme.Root},
+		{"Projects/aha/archype", true, theme.Tracked},
+		{"Projects/aha", true, theme.Dir},
+		{"Projects/new-thing", true, theme.Dir},
+		{"todo.txt", false, theme.File},
+	}
+	for _, tc := range cases {
+		style := m.entryStyle(filepath.Join(home, tc.path), entry{name: filepath.Base(tc.path), dir: tc.dir})
+		if got := style.GetForeground(); got != lipgloss.Color(tc.want) {
+			t.Errorf("%s is drawn in %v, want %s", tc.path, got, tc.want)
+		}
+	}
+}
+
+// Actions on a tracked directory work from the browser too.
+func TestBrowserActions(t *testing.T) {
+	m, back, home := browsing(t)
+	m = keys(t, m, "tab", "j") // aha/wipsync, behind
+	m = run(t, m, "s")
+	m = keys(t, m, "p", "m")
+	if !strings.Contains(asks(m), "Takes master into "+filepath.Join(home, "Projects/aha/wipsync")) {
+		t.Errorf("unexpected question: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	want := []string{"snapshot Projects/aha/wipsync", "pull Projects/aha/wipsync from "}
+	if !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	// After the refresh the browser is where it was.
+	if m.view != files || m.path() != filepath.Join(home, "Projects/aha/wipsync") {
+		t.Errorf("after an action: view %d on %q", m.view, m.path())
+	}
+	// Restore is chosen in the log, which the browser does not have.
+	if r := keys(t, m, "r"); r.dialog != nil || r.focus != folders {
+		t.Error("r did something in the browser")
+	}
+}
+
+func TestAdd(t *testing.T) {
+	m, back, home := browsing(t)
+	projects := filepath.Join(home, "Projects")
+	m = keys(t, m, "tab", "h", "j") // ~/Projects, on new-thing
+	if m.path() != filepath.Join(projects, "new-thing") {
+		t.Fatalf("on %q", m.path())
+	}
+
+	// Under a known root there is nothing to ask but yes or no.
+	m = keys(t, m, "a")
+	t.Logf("adding under a known root:\n%s", m.View())
+	if !strings.Contains(asks(m), "Add ~/Projects/new-thing?") ||
+		!strings.Contains(asks(m), "It becomes Projects/new-thing, with the root Projects at ~/Projects") {
+		t.Errorf("unexpected question: %s", asks(m))
+	}
+	if no := keys(t, m, "n"); no.dialog != nil || len(back.calls) != 0 {
+		t.Error("n did not cancel")
+	}
+	m = run(t, m, "y")
+	if want := []string{"add " + projects + "/new-thing as Projects at " + projects}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if !strings.HasPrefix(m.note, "added Projects/new-thing") {
+		t.Errorf("note = %q", m.note)
+	}
+
+	// With no known root above it, the root is chosen from its parents,
+	// and named again if its name is taken.
+	back.calls = nil
+	m = keys(t, m, "h", "g", "j", "l", "l") // ~/other/Projects, on x
+	other := filepath.Join(home, "other")
+	if m.path() != filepath.Join(other, "Projects/x") {
+		t.Fatalf("on %q", m.path())
+	}
+	m = keys(t, m, "a")
+	t.Logf("choosing a root:\n%s", m.View())
+	if !strings.Contains(asks(m), "Which parent of x is its root?") || !slices.Equal(m.dialog.choices, []string{other, other + "/Projects"}) {
+		t.Fatalf("unexpected question: %s, choices %v", asks(m), m.dialog.choices)
+	}
+	m = keys(t, m, "j", "enter")
+	if !strings.Contains(asks(m), "Name for the root ~/other/Projects?") || !strings.Contains(asks(m), `root name "Projects" is already used`) {
+		t.Fatalf("a taken name was not asked about: %s", asks(m))
+	}
+	m = keys(t, m, "enter") // the same name again
+	if !strings.Contains(asks(m), "is already used") {
+		t.Errorf("the taken name was accepted: %s", asks(m))
+	}
+	for range "Projects" {
+		m = keys(t, m, "backspace")
+	}
+	m = keys(t, m, "W", "o", "r", "k", "enter")
+	if !strings.Contains(asks(m), "It becomes Work/x, with the root Work at ~/other/Projects") {
+		t.Fatalf("unexpected question: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	if want := []string{"add " + other + "/Projects/x as Work at " + other + "/Projects"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+
+	// Choosing the higher parent, whose name is free.
+	back.calls = nil
+	m = keys(t, m, "a", "enter")
+	if !strings.Contains(asks(m), "It becomes other/Projects/x, with the root other at ~/other") {
+		t.Errorf("unexpected question: %s", asks(m))
+	}
+	m = keys(t, m, "esc")
+
+	// A directory that cannot be added says why.
+	back.fail = map[string]error{"addable " + other + "/Projects/x": errors.New("it overlaps Projects/aha/archype")}
+	m = keys(t, m, "a")
+	if !strings.Contains(asks(m), "Cannot add ~/other/Projects/x") || !strings.Contains(asks(m), "it overlaps") || len(back.calls) != 0 {
+		t.Errorf("unexpected box: %s", asks(m))
 	}
 }

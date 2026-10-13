@@ -33,6 +33,12 @@ func (m Model) View() string {
 	height := m.bodyHeight()
 
 	leftLines, rightLines := m.folderLines(left, height), m.logLines(right, height)
+	if m.view == files {
+		leftLines = m.browserLines(left, height)
+		if r := m.selected(); r.folder == nil && r.root == "" {
+			rightLines = m.previewLines(right, height)
+		}
+	}
 	bar := fg(m.theme.Border).Render("│")
 	body := make([]string, height)
 	for i := range body {
@@ -50,6 +56,9 @@ func (m Model) View() string {
 func (m Model) header() string {
 	title := fg(m.theme.Title).Bold(true).Render(" wipsync")
 	rest := fmt.Sprintf("  %s  %s", m.client, m.repository)
+	if m.view == files {
+		rest = "  " + short(m.br.dir)
+	}
 	state := ""
 	switch {
 	case m.busy != "":
@@ -64,7 +73,11 @@ func (m Model) header() string {
 func (m Model) footer() string {
 	// Only what can be done from here is offered.
 	keys := " j/k move"
-	switch {
+	switch e, _ := m.entry(); {
+	case m.view == files && e.dir:
+		keys += "  h up  l open"
+	case m.view == files:
+		keys += "  h up"
 	case m.focus == log:
 		keys += "  h folders"
 	case len(m.selected().snapshots()) > 0:
@@ -74,7 +87,11 @@ func (m Model) footer() string {
 	for _, a := range m.actions() {
 		keys += "  " + a.key + " " + a.does
 	}
-	keys += "    R refresh  q quit"
+	if m.view == files {
+		keys += "    . hidden  tab folders  R refresh  q quit"
+	} else {
+		keys += "    tab browse  R refresh  q quit"
+	}
 	switch {
 	case m.err != nil:
 		return fg(m.theme.Error).Render(cut(" "+m.err.Error(), m.width))
@@ -185,7 +202,7 @@ func (m Model) logLines(w, h int) []string {
 		for _, f := range inRoot {
 			counts[f.Status]++
 			if f.Dir != "" {
-				where = strings.TrimSuffix(strings.TrimSuffix(f.Dir, f.Folder.Path), "/")
+				where = short(strings.TrimSuffix(strings.TrimSuffix(f.Dir, f.Folder.Path), "/"))
 			}
 		}
 		add(fg(m.theme.Root).Bold(true), r.root)
@@ -205,7 +222,7 @@ func (m Model) logLines(w, h int) []string {
 	case r.folder != nil:
 		f := r.folder
 		_, colour := m.due(f.Status)
-		where := f.Dir
+		where := short(f.Dir)
 		if where == "" {
 			where = "not on this client"
 		}

@@ -24,7 +24,23 @@ type backend interface {
 	Restore(ctx context.Context, f config.Folder, name string) (app.RestoreResult, error)
 	RootDir(root string) (string, bool)
 	CheckNewRoot(root, dir string) error
+
+	// For adding a directory as a folder.
+	Roots() map[string]string
+	CheckAddable(dir string) error
+	RootAbove(dir string) (name, rootDir string, ok bool)
+	RootAt(dir string) (string, bool)
+	CheckRootName(name string) string
+	Add(dir, rootName, rootDir string) (config.Folder, error)
 }
+
+// leftView is what the left pane shows.
+type leftView int
+
+const (
+	tracked leftView = iota // the folders, under their roots
+	files                   // the file system
+)
 
 type pane int
 
@@ -53,6 +69,11 @@ type Model struct {
 	note    string // how the last action went, shown in the bottom line
 	busy    string // the action that is running, if one is
 	dialog  *dialog
+
+	view   leftView
+	br     browser
+	byDir  map[string]*app.FolderState // the folders on this client, by directory
+	rootAt map[string]string           // the roots on this client, by directory
 
 	rows   []row
 	sel    int // selected row of the folder list
@@ -120,9 +141,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.dialog.key(m, msg)
 		}
 		m.note = ""
-		switch msg.String() {
-		case "q":
+		key := msg.String()
+		switch {
+		case key == "q":
 			return m, tea.Quit
+		case key == "tab":
+			if m.view == tracked {
+				m.openBrowser()
+			} else {
+				m.view = tracked
+			}
+			return m, nil
+		case key == "R":
+			if !m.loading && m.busy == "" {
+				m.loading = true
+				return m, m.load()
+			}
+			return m, nil
+		case m.view == files:
+			if m.browserKey(key) {
+				return m, nil
+			}
+			return m.act(key)
+		}
+		switch key {
 		case "j", "down":
 			m.move(1)
 		case "k", "up":
@@ -137,17 +179,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "h", "left":
 			m.focus = folders
-		case "R":
-			if !m.loading && m.busy == "" {
-				m.loading = true
-				return m, m.load()
-			}
 		default:
-			for _, a := range m.actions() {
-				if a.key == msg.String() && m.busy == "" {
-					return a.run(m)
-				}
-			}
+			return m.act(key)
+		}
+	}
+	return m, nil
+}
+
+// act runs the action a key stands for where the selection is, if any.
+func (m Model) act(key string) (tea.Model, tea.Cmd) {
+	for _, a := range m.actions() {
+		if a.key == key && m.busy == "" {
+			return a.run(m)
 		}
 	}
 	return m, nil
@@ -156,9 +199,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // setWorld takes in a fresh survey, keeping the selection on the same
 // folder if it is still there.
 func (m *Model) setWorld(w app.World) {
-	before := m.selected()
+	before := m.trackedRow()
 	m.world, m.loaded = w, true
 	m.rows = m.rows[:0]
+	m.byDir, m.rootAt = map[string]*app.FolderState{}, map[string]string{}
+	for name, dir := range m.back.Roots() {
+		m.rootAt[dir] = name
+	}
 	root := ""
 	for i := range w.Folders {
 		f := &w.Folders[i]
@@ -167,6 +214,9 @@ func (m *Model) setWorld(w app.World) {
 			m.rows = append(m.rows, row{root: root})
 		}
 		m.rows = append(m.rows, row{root: root, folder: f})
+		if f.Dir != "" {
+			m.byDir[f.Dir] = f
+		}
 	}
 	m.sel = 0
 	for i, r := range m.rows {
@@ -178,7 +228,12 @@ func (m *Model) setWorld(w app.World) {
 	if m.sel == 0 && len(m.rows) > 1 && before.name() == "" {
 		m.sel = 1 // the first folder, not its root
 	}
-	if n := len(m.selected().snapshots()); m.logSel >= n {
+	if m.view == files {
+		// The directory may have changed too, and so may what is tracked.
+		e, _ := m.entry()
+		m.browse(m.br.dir, e.name)
+	}
+	if n := len(m.trackedRow().snapshots()); m.logSel >= n {
 		m.logSel, m.logTop = 0, 0
 		if n == 0 {
 			m.focus = folders
@@ -202,12 +257,29 @@ func (r row) snapshots() []restic.Snapshot {
 	return r.folder.Snapshots
 }
 
-// selected is the row the folder list is on; the zero row if it is empty.
-func (m Model) selected() row {
+// trackedRow is the row the folder list is on; the zero row if it is empty.
+func (m Model) trackedRow() row {
 	if m.sel < 0 || m.sel >= len(m.rows) {
 		return row{}
 	}
 	return m.rows[m.sel]
+}
+
+// selected is the folder or root that is selected, in whichever view the
+// left pane shows. In the file system it is the zero row for anything that
+// is neither.
+func (m Model) selected() row {
+	if m.view == tracked {
+		return m.trackedRow()
+	}
+	folder, root := m.kind(m.path())
+	switch {
+	case folder != nil:
+		return row{root: folder.Folder.Root, folder: folder}
+	case root != "":
+		return row{root: root}
+	}
+	return row{}
 }
 
 // under returns the folders of a root.
@@ -252,6 +324,7 @@ func (m *Model) scroll() {
 	}
 	m.top = keep(m.sel, m.top, m.bodyHeight())
 	m.logTop = keep(m.logSel, m.logTop, m.bodyHeight()-logHeader)
+	m.br.top = keep(m.br.sel, m.br.top, m.bodyHeight())
 }
 
 // bodyHeight is the height of the two panes: all but the top and bottom

@@ -26,6 +26,24 @@ type action struct {
 // are offered in the bottom line, and only these do anything.
 func (m Model) actions() []action {
 	r := m.selected()
+	if m.view == files {
+		e, ok := m.entry()
+		switch {
+		case !ok:
+			return nil
+		case r.folder != nil:
+			return []action{
+				{"s", "snapshot", Model.snapshot},
+				{"P", "push", Model.push},
+				{"p", "pull", Model.pullMenu},
+			}
+		case r.root != "":
+			return []action{{"p", "pull all", Model.askPullAll}}
+		case e.dir:
+			return []action{{"a", "add", Model.add}}
+		}
+		return nil
+	}
 	switch {
 	case m.focus == log:
 		return []action{{"r", "restore this snapshot", Model.askRestore}}
@@ -343,6 +361,82 @@ func (m Model) askRestore() (tea.Model, tea.Cmd) {
 					note += "; its state before is snapshot " + res.Undo[:8]
 				}
 				return note, nil
+			})
+		},
+	}
+	return m, nil
+}
+
+// add starts syncing the directory selected in the file system. Its root
+// is the known root it is under; without one, the root is asked for.
+func (m Model) add() (tea.Model, tea.Cmd) {
+	dir := m.path()
+	if err := m.back.CheckAddable(dir); err != nil {
+		m.dialog = message("Cannot add "+short(dir), err.Error())
+		return m, nil
+	}
+	if name, rootDir, ok := m.back.RootAbove(dir); ok {
+		return m.askAdd(dir, name, rootDir)
+	}
+	candidates := app.RootCandidates(dir)
+	labels := make([]string, len(candidates))
+	for i, c := range candidates {
+		labels[i] = short(c)
+	}
+	m.dialog = &dialog{
+		title:   "Which parent of " + filepath.Base(dir) + " is its root?",
+		text:    "A folder is known to all clients by its root and its path under it. Each client maps the root to its own location.",
+		choices: candidates,
+		labels:  labels,
+		done: func(m Model, rootDir string) (tea.Model, tea.Cmd) {
+			if name, ok := m.back.RootAt(rootDir); ok {
+				return m.askAdd(dir, name, rootDir)
+			}
+			return m.nameRoot(dir, rootDir, filepath.Base(rootDir))
+		},
+	}
+	return m, nil
+}
+
+// nameRoot goes on with name for a new root, asking for another while the
+// name cannot be used.
+func (m Model) nameRoot(dir, rootDir, name string) (tea.Model, tea.Cmd) {
+	problem := m.back.CheckRootName(name)
+	if problem == "" {
+		return m.askAdd(dir, name, rootDir)
+	}
+	m.dialog = &dialog{
+		title:   "Name for the root " + short(rootDir) + "?",
+		text:    "Other clients know the root by this name.",
+		typing:  true,
+		typed:   name,
+		problem: problem,
+		done: func(m Model, typed string) (tea.Model, tea.Cmd) {
+			return m.nameRoot(dir, rootDir, typed)
+		},
+	}
+	return m, nil
+}
+
+// askAdd confirms adding the directory under the root.
+func (m Model) askAdd(dir, rootName, rootDir string) (tea.Model, tea.Cmd) {
+	rel, err := filepath.Rel(rootDir, dir)
+	if err != nil {
+		m.dialog = message("Cannot add "+short(dir), err.Error())
+		return m, nil
+	}
+	name := rootName + "/" + filepath.ToSlash(rel)
+	m.dialog = &dialog{
+		title:   "Add " + short(dir) + "?",
+		text:    "It becomes " + name + ", with the root " + rootName + " at " + short(rootDir) + ". Nothing is uploaded until its first snapshot.",
+		confirm: true,
+		done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+			return m.start("adding "+name, "add "+short(dir), func(context.Context) (string, error) {
+				f, err := m.back.Add(dir, rootName, rootDir)
+				if err != nil {
+					return "", err
+				}
+				return "added " + f.String() + ": s to take its first snapshot", nil
 			})
 		},
 	}

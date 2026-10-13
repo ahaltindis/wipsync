@@ -72,3 +72,24 @@ func (a *App) Add(dir, rootName, rootDir string) (config.Folder, error) {
 	a.Config.Folders = append(a.Config.Folders, f)
 	return f, a.Config.Save(a.ConfigPath)
 }
+
+// RootAbove returns the known root that dir is inside: its name and where
+// it is on this client.
+func (a *App) RootAbove(dir string) (name, rootDir string, ok bool) {
+	name, ok = a.Config.RootAbove(dir)
+	return name, a.Config.Roots[name], ok
+}
+
+// RootAt returns the name of the root located at dir.
+func (a *App) RootAt(dir string) (string, bool) {
+	return a.Config.RootAt(dir)
+}
+
+// Roots returns where each known root is on this client.
+func (a *App) Roots() map[string]string {
+	roots := make(map[string]string, len(a.Config.Roots))
+	for name, dir := range a.Config.Roots {
+		roots[name] = dir
+	}
+	return roots
+}
