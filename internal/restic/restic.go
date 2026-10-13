@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -94,6 +95,13 @@ type Client struct {
 	Repository      string
 	PasswordFile    string
 	PasswordCommand string
+
+	// NoTerminal keeps restic away from the terminal, for a caller that
+	// owns the screen and the keyboard. Left with the terminal, restic
+	// hands it to the ssh it starts, so that ssh can ask for a password;
+	// until ssh has connected, a key pressed in the caller then stops the
+	// caller. Without the terminal, an ssh that would have to ask fails.
+	NoTerminal bool
 }
 
 func (c *Client) run(ctx context.Context, dir string, args ...string) ([]byte, error) {
@@ -102,6 +110,10 @@ func (c *Client) run(ctx context.Context, dir string, args ...string) ([]byte, e
 	// default is to kill it, which leaves its lock in the repository.
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = interruptGrace
+	if c.NoTerminal {
+		// In a session of its own, restic has no terminal to hand over.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "RESTIC_REPOSITORY="+c.Repository)
 	if c.PasswordFile != "" {

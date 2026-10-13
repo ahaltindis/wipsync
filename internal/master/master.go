@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // Pointers is how a client reads and moves master pointers, wherever the
@@ -47,11 +48,23 @@ func (e *MovedError) Error() string {
 // Open returns the pointers that belong to a restic repository: on this
 // machine for a local directory, through ssh for an sftp repository.
 func Open(repository string) (Pointers, error) {
+	return open(repository, false)
+}
+
+// OpenNoTerminal is Open for a caller that owns the screen and the
+// keyboard: an ssh that would have to ask something fails, where it would
+// otherwise write over the screen and take the keys.
+func OpenNoTerminal(repository string) (Pointers, error) {
+	return open(repository, true)
+}
+
+func open(repository string, noTerminal bool) (Pointers, error) {
 	if rest, ok := strings.CutPrefix(repository, "sftp:"); ok {
 		t, err := parseSFTP(rest)
 		if err != nil {
 			return nil, fmt.Errorf("repository %s: %w", repository, err)
 		}
+		t.noTerminal = noTerminal
 		return &pointers{where: t.host, repo: t.path, run: t.run}, nil
 	}
 	if rest, ok := strings.CutPrefix(repository, "local:"); ok {
@@ -78,6 +91,8 @@ type target struct {
 	host string // as given to ssh, with the user if there is one
 	port string
 	path string // of the repository on the server
+
+	noTerminal bool // ssh must not ask anything; see OpenNoTerminal
 }
 
 // sshCommand builds the ssh call that runs a command line on the server.
@@ -86,8 +101,16 @@ var sshCommand = func(ctx context.Context, t target, commandLine string) *exec.C
 	if t.port != "" {
 		args = append(args, "-p", t.port)
 	}
+	if t.noTerminal {
+		args = append(args, "-o", "BatchMode=yes")
+	}
 	args = append(args, "--", t.host, commandLine)
-	return exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	if t.noTerminal {
+		// In a session of its own, ssh has no terminal to ask on.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
+	return cmd
 }
 
 // run sends the script through ssh. ssh hands one command line to the

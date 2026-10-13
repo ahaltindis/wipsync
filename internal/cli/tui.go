@@ -36,6 +36,8 @@ Colours come from theme.toml beside the config file. Start one with:
 			if err != nil {
 				return err
 			}
+			// The interface owns the terminal: nothing it starts may use it.
+			a.NoTerminal = true
 			if _, err := a.Client(); err != nil {
 				return err
 			}

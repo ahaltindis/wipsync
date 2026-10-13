@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/ahaltindis/wipsync/internal/config"
-	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -59,7 +58,7 @@ func (a *App) Survey(ctx context.Context) (World, error) {
 		return w, err
 	}
 	var masters map[string]string
-	pointers, masterErr := master.Open(a.Config.Repository)
+	pointers, masterErr := a.Pointers()
 	if masterErr == nil {
 		masters, masterErr = pointers.All(ctx)
 	}

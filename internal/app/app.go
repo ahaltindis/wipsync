@@ -23,6 +23,11 @@ type App struct {
 	ConfigPath string
 	Config     *config.Config
 	State      *state.Store
+
+	// NoTerminal is set by a caller that owns the screen and the keyboard.
+	// restic and ssh are then kept away from the terminal: one that would
+	// have to ask for something fails.
+	NoTerminal bool
 }
 
 // Open loads the config at configPath, or the default one if it is empty.
@@ -72,7 +77,16 @@ func (a *App) Client() (*restic.Client, error) {
 		Repository:      a.Config.Repository,
 		PasswordFile:    a.Config.PasswordFilePath(),
 		PasswordCommand: a.Config.PasswordCommand,
+		NoTerminal:      a.NoTerminal,
 	}, nil
+}
+
+// Pointers returns the master pointers of the configured repository.
+func (a *App) Pointers() (master.Pointers, error) {
+	if a.NoTerminal {
+		return master.OpenNoTerminal(a.Config.Repository)
+	}
+	return master.Open(a.Config.Repository)
 }
 
 // remote returns what an operation on the repository needs: the restic
@@ -82,7 +96,7 @@ func (a *App) remote(ctx context.Context) (*restic.Client, master.Pointers, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	pointers, err := master.Open(a.Config.Repository)
+	pointers, err := a.Pointers()
 	if err != nil {
 		return nil, nil, err
 	}

@@ -234,3 +234,34 @@ func TestRestore(t *testing.T) {
 		t.Errorf("found = %+v, %v", found, err)
 	}
 }
+
+// A client kept away from the terminal runs restic in a session of its own,
+// and works as before.
+func TestNoTerminal(t *testing.T) {
+	c := newRepo(t)
+	c.NoTerminal = true
+	ctx := context.Background()
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "a.txt"), "one")
+	res, err := c.Backup(ctx, BackupOptions{Dir: dir, Host: "client-a"})
+	if err != nil || res.SnapshotID == "" {
+		t.Fatalf("backup: %+v, %v", res, err)
+	}
+	// The session of the restic it starts is not this process's.
+	out, err := exec.Command("sh", "-c", "ps -o sid= -p $$").Output()
+	if err != nil {
+		t.Skip("cannot read session IDs with ps")
+	}
+	own := strings.TrimSpace(string(out))
+	c.PasswordCommand, c.PasswordFile = "sh -c 'ps -o sid= -p $$ >"+filepath.Join(dir, "sid")+"; echo test'", ""
+	if err := c.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := os.ReadFile(filepath.Join(dir, "sid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(theirs)); got == own || got == "" {
+		t.Errorf("restic ran in session %q, the same as this process (%q)", got, own)
+	}
+}

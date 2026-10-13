@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/ahaltindis/wipsync/internal/config"
-	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -36,7 +35,7 @@ func (a *App) Log(ctx context.Context, f config.Folder) (History, error) {
 		return h, err
 	}
 	slices.Reverse(h.Snapshots)
-	if pointers, err := master.Open(a.Config.Repository); err != nil {
+	if pointers, err := a.Pointers(); err != nil {
 		h.MasterErr = err
 	} else {
 		h.Master, h.MasterErr = pointers.Master(ctx, f.Root, f.Path)
@@ -79,7 +78,7 @@ func (a *App) List(ctx context.Context) (Overview, error) {
 		return o, err
 	}
 	var masters map[string]string
-	pointers, masterErr := master.Open(a.Config.Repository)
+	pointers, masterErr := a.Pointers()
 	if masterErr == nil {
 		masters, masterErr = pointers.All(ctx)
 	}

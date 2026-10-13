@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ func newRepo(t *testing.T) string {
 	return repo
 }
 
-func open(t *testing.T, repository string) Pointers {
+func opened(t *testing.T, repository string) Pointers {
 	t.Helper()
 	p, err := Open(repository)
 	if err != nil {
@@ -35,7 +36,7 @@ func open(t *testing.T, repository string) Pointers {
 
 func TestMove(t *testing.T) {
 	repo := newRepo(t)
-	p := open(t, repo+"/")
+	p := opened(t, repo+"/")
 	ctx := context.Background()
 	const root, path = "Projects", "Freelance/app"
 
@@ -96,7 +97,7 @@ func TestMove(t *testing.T) {
 
 func TestAll(t *testing.T) {
 	repo := newRepo(t)
-	p := open(t, repo)
+	p := opened(t, repo)
 	ctx := context.Background()
 	if all, err := p.All(ctx); err != nil || len(all) != 0 {
 		t.Errorf("empty store: %v, %v", all, err)
@@ -124,14 +125,14 @@ func TestAll(t *testing.T) {
 			t.Errorf("%s: master = %q, want %q", folder, all[folder], master)
 		}
 	}
-	if _, err := open(t, repo+"-missing").All(ctx); err == nil {
+	if _, err := opened(t, repo+"-missing").All(ctx); err == nil {
 		t.Error("All succeeded without a repository")
 	}
 }
 
 func TestRejectsBadInput(t *testing.T) {
 	repo := newRepo(t)
-	p := open(t, repo)
+	p := opened(t, repo)
 	ctx := context.Background()
 	bad := []struct{ root, path, expect, id string }{
 		{"..", "app", "", id("a")},
@@ -162,7 +163,7 @@ func TestRejectsBadInput(t *testing.T) {
 
 func TestNoRepository(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "repo")
-	p := open(t, missing)
+	p := opened(t, missing)
 	ctx := context.Background()
 	for name, err := range map[string]error{
 		"Check": p.Check(ctx),
@@ -187,7 +188,7 @@ func TestMoveRace(t *testing.T) {
 	ctx := context.Background()
 	const root, path = "Projects", "app"
 	for round := 0; round < 20; round++ {
-		base, err := open(t, repo).Master(ctx, root, path)
+		base, err := opened(t, repo).Master(ctx, root, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +200,7 @@ func TestMoveRace(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				// An ID no other pusher or round uses.
-				results[i] = open(t, repo).Move(ctx, root, path, base, fmt.Sprintf("%064x", round*pushers+i+1))
+				results[i] = opened(t, repo).Move(ctx, root, path, base, fmt.Sprintf("%064x", round*pushers+i+1))
 			}()
 		}
 		wg.Wait()
@@ -216,7 +217,7 @@ func TestMoveRace(t *testing.T) {
 		if won != 1 {
 			t.Fatalf("round %d: %d pushers won, want 1", round, won)
 		}
-		got, err := open(t, repo).Master(ctx, root, path)
+		got, err := opened(t, repo).Master(ctx, root, path)
 		if err != nil || got == base {
 			t.Fatalf("round %d: master = %q, %v", round, got, err)
 		}
@@ -283,7 +284,7 @@ func TestOverSSH(t *testing.T) {
 			if err := os.Mkdir(repo, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			p := open(t, "sftp:user@host:"+repo)
+			p := opened(t, "sftp:user@host:"+repo)
 			const root, path = "My Projects", `it's; rm -rf * "x" \n`
 
 			if err := p.Check(ctx); err != nil {
@@ -309,11 +310,11 @@ func TestOverSSH(t *testing.T) {
 				t.Errorf("all = %v, %v", all, err)
 			}
 			// The same pointer, read without ssh.
-			if got, _ := open(t, repo).Master(ctx, root, path); got != id("b") {
+			if got, _ := opened(t, repo).Master(ctx, root, path); got != id("b") {
 				t.Errorf("read locally: %q", got)
 			}
 
-			err := open(t, "sftp:user@host:"+repo+"-missing").Check(ctx)
+			err := opened(t, "sftp:user@host:"+repo+"-missing").Check(ctx)
 			if err == nil || !strings.Contains(err.Error(), "there is no repository at "+repo+"-missing on user@host") {
 				t.Errorf("missing repository: err = %v", err)
 			}
@@ -327,8 +328,43 @@ func TestSSHFailure(t *testing.T) {
 	sshCommand = func(ctx context.Context, _ target, _ string) *exec.Cmd {
 		return exec.CommandContext(ctx, "sh", "-c", "echo 'ssh: connect to host: Connection refused' >&2; exit 255")
 	}
-	err := open(t, "sftp:user@host:/repo").Check(context.Background())
+	err := opened(t, "sftp:user@host:/repo").Check(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "user@host: ssh: connect to host: Connection refused") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// A caller that owns the terminal gets an ssh that cannot ask on it.
+func TestNoTerminal(t *testing.T) {
+	ctx := context.Background()
+	plain := sshCommand(ctx, target{host: "user@host", port: "2222"}, "true")
+	if plain.SysProcAttr != nil || slices.Contains(plain.Args, "BatchMode=yes") {
+		t.Errorf("a plain ssh is detached: %v", plain.Args)
+	}
+	if want := []string{"ssh", "-p", "2222", "--", "user@host", "true"}; !slices.Equal(plain.Args, want) {
+		t.Errorf("args = %v, want %v", plain.Args, want)
+	}
+
+	p, err := OpenNoTerminal("sftp:user@host:/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := sshCommand(ctx, target{host: "user@host", noTerminal: true}, "true")
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
+		t.Error("ssh is not started in its own session")
+	}
+	if want := []string{"ssh", "-o", "BatchMode=yes", "--", "user@host", "true"}; !slices.Equal(cmd.Args, want) {
+		t.Errorf("args = %v, want %v", cmd.Args, want)
+	}
+	if !p.(*pointers).run(ctx, "true").SysProcAttr.Setsid {
+		t.Error("OpenNoTerminal does not pass it on")
+	}
+	// Local repositories have no ssh, and work either way.
+	local, err := OpenNoTerminal(newRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := local.Check(ctx); err != nil {
+		t.Error(err)
 	}
 }
