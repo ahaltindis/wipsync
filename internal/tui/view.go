@@ -100,6 +100,16 @@ func (m Model) header() string {
 }
 
 func (m Model) footer() string {
+	if m.search != nil {
+		// The query being typed takes the line.
+		line := " /" + m.search.query + "█"
+		hint := "    enter keep  esc back"
+		if m.search.query != "" && m.find(m.search.query, 0, 1) < 0 {
+			return fg(m.theme.Error).Render(cut(line+"    no match", m.width))
+		}
+		room := m.width - runewidth.StringWidth(line)
+		return fg(m.theme.Title).Render(line) + fg(m.theme.Dim).Render(cut(hint, room))
+	}
 	// Only what can be done from here is offered. What is always there
 	// comes last, where a narrow window cuts first.
 	var groups []string
@@ -132,6 +142,12 @@ func (m Model) footer() string {
 		view = append(view, "space mark", "esc unmark all")
 	case m.focus == folders && (m.view == tracked || e.dir):
 		view = append(view, "space mark")
+	}
+	if m.focus == folders {
+		view = append(view, "/ search")
+		if m.lastQuery != "" {
+			view = append(view, "n next")
+		}
 	}
 	if m.view == files {
 		view = append(view, ". hidden", "tab folders")

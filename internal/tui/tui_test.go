@@ -237,7 +237,7 @@ func TestScreen(t *testing.T) {
 		"/home/u/Projects/aha/archype",
 		"in step with master",
 		"b1b1b1b1  2026-10-13 10:30  desktop    master  base",
-		"l log    s snapshot  P push  p pull  r restore    space mark  tab browse",
+		"l log    s snapshot  P push  p pull  r restore    space mark  / search  tab browse",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -329,9 +329,9 @@ func TestHints(t *testing.T) {
 		typed []string
 		want  string
 	}{
-		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore    space mark  tab browse    j/k move  R refresh  q quit"},
-		{"a folder that is not here", []string{"j"}, "l log    p pull    space mark  tab browse    j/k move  R refresh  q quit"},
-		{"a root", []string{"g"}, "p pull all    space mark  tab browse    j/k move  R refresh  q quit"},
+		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore    space mark  / search  tab browse    j/k move  R refresh  q quit"},
+		{"a folder that is not here", []string{"j"}, "l log    p pull    space mark  / search  tab browse    j/k move  R refresh  q quit"},
+		{"a root", []string{"g"}, "p pull all    space mark  / search  tab browse    j/k move  R refresh  q quit"},
 		{"a snapshot in the log", []string{"j", "l"}, "h folders    r restore this snapshot    tab browse    j/k move  R refresh  q quit"},
 	}
 	for _, tc := range cases {
@@ -752,7 +752,7 @@ func TestBrowser(t *testing.T) {
 		" archype/", "tracked", " wipsync/", "behind",
 		// A tracked directory shows what the folder list would: its log.
 		"Projects/aha/archype", "in step with master", "b1b1b1b1",
-		"h up  l open    s snapshot  P push  p pull    space mark  . hidden  tab folders",
+		"h up  l open    s snapshot  P push  p pull    space mark  / search  . hidden  tab folders",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -766,7 +766,7 @@ func TestBrowser(t *testing.T) {
 	if m.br.dir != filepath.Join(home, "Projects") || m.path() != filepath.Join(home, "Projects/aha") {
 		t.Fatalf("after h: at %q on %q", m.br.dir, m.path())
 	}
-	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add    space mark  . hidden"} {
+	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add    space mark  / search  . hidden"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
 		}
@@ -801,7 +801,7 @@ func TestBrowser(t *testing.T) {
 	if m.path() != filepath.Join(home, "todo.txt") {
 		t.Fatalf("G went to %q", m.path())
 	}
-	if got := bottom(m); got != "h up    . hidden  tab folders    j/k move  R refresh  q quit" {
+	if got := bottom(m); got != "h up    / search  . hidden  tab folders    j/k move  R refresh  q quit" {
 		t.Errorf("bottom line on a file = %q", got)
 	}
 	if !strings.Contains(m.View(), "6 B, changed ") {
@@ -948,7 +948,7 @@ func TestMarkingFolders(t *testing.T) {
 		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
 	}
 	// archype is here and website is not: one to snapshot or push, two to pull.
-	if got, want := bottom(m), "l log    2 marked:  s snapshot 1  P push 1  p pull 2    space mark  esc unmark all  tab browse    j/k move  R refresh  q quit"; got != want {
+	if got, want := bottom(m), "l log    2 marked:  s snapshot 1  P push 1  p pull 2    space mark  esc unmark all  / search  tab browse"; !strings.HasPrefix(got, want) {
 		t.Errorf("bottom line:\n got %q\nwant %q", got, want)
 	}
 	// Space again unmarks.
@@ -1059,7 +1059,7 @@ func TestMarkingInBrowser(t *testing.T) {
 	if !strings.Contains(screen, "┃new-thing/") || !strings.Contains(screen, "┃one/") || !strings.Contains(screen, "┃two/") || strings.Contains(screen, "┃three/") {
 		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
 	}
-	if !strings.Contains(bottom(m), "3 marked:  a add 3    space mark  esc unmark all  . hidden  tab folders") {
+	if !strings.Contains(bottom(m), "3 marked:  a add 3    space mark  esc unmark all  / search  . hidden  tab folders") {
 		t.Errorf("bottom line = %q", bottom(m))
 	}
 	// Marks stay while moving around, and other views have their own.
@@ -1132,5 +1132,118 @@ func TestMarkingInBrowser(t *testing.T) {
 	m = keys(t, m, " ", " ", "a")
 	if !strings.Contains(asks(m), "Cannot add 1 of the 2 marked directories") || !strings.Contains(asks(m), "is already added") || len(back.calls) != 0 {
 		t.Errorf("unexpected box: %s", asks(m))
+	}
+}
+
+// "/" searches the left pane: the selection follows what is typed.
+func TestSearch(t *testing.T) {
+	m, _ := started(t, 130, 20)
+	typed := func(m Model, text string) Model {
+		for _, r := range text {
+			m = send(t, m, keyMsg(string(r)))
+		}
+		return m
+	}
+	m = keys(t, m, "/")
+	if got := bottom(m); got != "/█    enter keep  esc back" {
+		t.Errorf("bottom line = %q", got)
+	}
+	// The selection moves as the query grows, without regard to case.
+	m = typed(m, "a")
+	if m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("after a: on %q", m.selected().name())
+	}
+	m = typed(m, "ha/W")
+	if m.selected().name() != "Projects/aha/website" || bottom(m) != "/aha/W█    enter keep  esc back" {
+		t.Errorf("after aha/W: on %q, bottom %q", m.selected().name(), bottom(m))
+	}
+	m = typed(m, "i")
+	if m.selected().name() != "Projects/aha/wipsync" {
+		t.Errorf("after aha/Wi: on %q", m.selected().name())
+	}
+	// Nothing matches: it says so, and waits where the search started.
+	m = typed(m, "zz")
+	if m.selected().name() != "Projects/aha/archype" || !strings.Contains(bottom(m), "no match") {
+		t.Errorf("with no match: on %q, bottom %q", m.selected().name(), bottom(m))
+	}
+	// Taking letters back brings the match back.
+	m = keys(t, m, "backspace", "backspace")
+	if m.selected().name() != "Projects/aha/wipsync" {
+		t.Errorf("after backspace: on %q", m.selected().name())
+	}
+	// While typing, letters are letters: q does not quit, s does not snapshot.
+	m = keys(t, m, "backspace", "backspace", "backspace", "backspace", "backspace", "backspace")
+	next, cmd := m.Update(keyMsg("q"))
+	if m = next.(Model); cmd != nil || m.search == nil || m.search.query != "q" {
+		t.Fatalf("q while searching: quit %v, query %+v", cmd != nil, m.search)
+	}
+	// Esc gives up and goes back to where it started.
+	if m = keys(t, m, "esc"); m.search != nil || m.selected().name() != "Projects/aha/archype" {
+		t.Errorf("after esc: searching %v, on %q", m.search != nil, m.selected().name())
+	}
+
+	// Enter keeps the place; n and N then go through the matches, around the end.
+	m = typed(keys(t, m, "/"), "es")
+	if m.selected().name() != "notes" { // the root, the first line with "es"
+		t.Fatalf("after es: on %q", m.selected().name())
+	}
+	m = keys(t, m, "enter")
+	if m.search != nil || m.selected().name() != "notes" || !strings.Contains(bottom(m), "/ search  n next") {
+		t.Errorf("after enter: on %q, bottom %q", m.selected().name(), bottom(m))
+	}
+	var seen []string
+	for range 4 {
+		m = keys(t, m, "n")
+		seen = append(seen, m.selected().name())
+	}
+	if want := []string{"notes/journal", "notes/recipes", "notes", "notes/journal"}; !slices.Equal(seen, want) {
+		t.Errorf("n went through %v, want %v", seen, want)
+	}
+	if m = keys(t, m, "N", "N"); m.selected().name() != "notes/recipes" {
+		t.Errorf("after N N: on %q", m.selected().name())
+	}
+	// A root is found by its name, a folder also by its root's.
+	m = typed(keys(t, m, "/"), "proj")
+	if m.selected().name() != "Projects" {
+		t.Errorf("after proj: on %q", m.selected().name())
+	}
+	m = keys(t, m, "enter")
+
+	// The log has no search; the key does nothing there.
+	if in := keys(t, m, "j", "l", "/"); in.search != nil {
+		t.Error("/ started a search in the log")
+	}
+}
+
+func TestSearchInBrowser(t *testing.T) {
+	m, _, home := browsing(t)
+	m = keys(t, m, "tab")
+	m.browse(home, "") // notes, other, Projects, todo.txt
+	m = keys(t, m, "/", "o")
+	if m.path() != filepath.Join(home, "notes") {
+		t.Errorf("after o: on %q", m.path())
+	}
+	m = keys(t, m, "t", "h")
+	if m.path() != filepath.Join(home, "other") {
+		t.Errorf("after oth: on %q", m.path())
+	}
+	m = keys(t, m, "esc", "/", "T", "O", "D")
+	if m.path() != filepath.Join(home, "todo.txt") {
+		t.Errorf("after TOD: on %q", m.path())
+	}
+	// The right pane follows, as when moving by hand.
+	if !strings.Contains(m.View(), "a file cannot be added") {
+		t.Errorf("the preview did not follow the search:\n%s", m.View())
+	}
+	m = keys(t, m, "enter", "h", "l")
+	// The kept query still works after moving to another directory.
+	m.browse(filepath.Join(home, "Projects"), "")
+	if m = keys(t, m, "n"); m.note != "nothing matches TOD" {
+		t.Errorf("note = %q", m.note)
+	}
+	// An empty directory has nothing to find.
+	m.browse(filepath.Join(home, "other/Projects/x"), "")
+	if m = keys(t, m, "/", "a"); !strings.Contains(bottom(m), "no match") {
+		t.Errorf("bottom line = %q", bottom(m))
 	}
 }

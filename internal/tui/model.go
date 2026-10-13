@@ -78,6 +78,9 @@ type Model struct {
 
 	marks map[string]bool // the marked folders of the folder list, by name
 
+	search    *search // the query being typed, if one is
+	lastQuery string  // the last query that was kept, for n and N
+
 	rows   []row
 	sel    int // selected row of the folder list
 	top    int // its first visible row
@@ -143,9 +146,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog != nil {
 			return m.dialog.key(m, msg)
 		}
+		if m.search != nil {
+			return m.searchKey(msg)
+		}
 		m.note = ""
 		key := msg.String()
 		switch {
+		case key == "/" && m.focus == folders:
+			m.search = &search{from: m.line()}
+			return m, nil
+		case (key == "n" || key == "N") && m.focus == folders && m.lastQuery != "":
+			if key == "n" {
+				m.again(1)
+			} else {
+				m.again(-1)
+			}
+			return m, nil
 		case key == "q":
 			return m, tea.Quit
 		case key == "tab":
