@@ -16,12 +16,13 @@ func tuiCmd() *cobra.Command {
 	var printTheme bool
 	cmd := &cobra.Command{
 		Use:   "tui",
-		Short: "Browse the folders and their snapshots in the terminal",
-		Long: `Browse the folders and their snapshots in the terminal.
+		Short: "Browse and sync the folders in the terminal",
+		Long: `Browse and sync the folders in the terminal.
 
 The left pane lists the folders under their roots, coloured by what is due:
 a snapshot, a push or a pull. The right pane shows the selected folder's
-snapshots from all clients.
+snapshots from all clients. The bottom line names the keys that act on what
+is selected.
 
 Colours come from theme.toml beside the config file. Start one with:
   wipsync tui --print-theme > ~/.config/wipsync/theme.toml`,

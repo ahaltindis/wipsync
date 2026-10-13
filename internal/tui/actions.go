@@ -1,0 +1,350 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/restic"
+)
+
+// action is something a key does to what is selected.
+type action struct {
+	key, does string
+	run       func(Model) (tea.Model, tea.Cmd)
+}
+
+// actions are the keys that apply where the selection is now. Only these
+// are offered in the bottom line, and only these do anything.
+func (m Model) actions() []action {
+	r := m.selected()
+	switch {
+	case m.focus == log:
+		return []action{{"r", "restore this snapshot", Model.askRestore}}
+	case r.folder == nil && r.root != "":
+		return []action{{"p", "pull all", Model.askPullAll}}
+	case r.folder == nil:
+		return nil
+	case r.folder.Dir == "":
+		return []action{{"p", "pull", Model.pullMenu}}
+	}
+	return []action{
+		{"s", "snapshot", Model.snapshot},
+		{"P", "push", Model.push},
+		{"p", "pull", Model.pullMenu},
+		{"r", "restore", Model.chooseRestore},
+	}
+}
+
+// brief names a snapshot in a few words, for the bottom line.
+func brief(s restic.Snapshot) string {
+	return fmt.Sprintf("%s (%s, %s)", s.ID[:8], s.Host, app.Age(time.Since(s.Time)))
+}
+
+// doneMsg is how a finished action reports back.
+type doneMsg struct {
+	what string // what was being done, for "Could not …"
+	note string // how it went
+	err  error
+}
+
+// start runs an action in the background; the screen says it is running.
+func (m Model) start(busy, what string, run func(ctx context.Context) (string, error)) (tea.Model, tea.Cmd) {
+	m.busy = busy
+	return m, func() tea.Msg {
+		note, err := run(context.Background())
+		return doneMsg{what: what, note: note, err: err}
+	}
+}
+
+func (m Model) snapshot() (tea.Model, tea.Cmd) {
+	f := m.selected().folder.Folder
+	return m.start("snapshotting "+f.String(), "snapshot "+f.String(), func(ctx context.Context) (string, error) {
+		res, err := m.back.Snapshot(ctx, f)
+		if err != nil || res.SnapshotID == "" {
+			return f.String() + ": no changes", err
+		}
+		return fmt.Sprintf("%s: snapshot %s, %d new, %d changed, %s stored",
+			f, res.SnapshotID[:8], res.FilesNew, res.FilesChanged, app.FormatBytes(res.BytesStored)), nil
+	})
+}
+
+func (m Model) push() (tea.Model, tea.Cmd) {
+	f := m.selected().folder.Folder
+	return m.start("pushing "+f.String(), "push "+f.String(), func(ctx context.Context) (string, error) {
+		res, err := m.back.Push(ctx, f)
+		if err != nil {
+			return "", err
+		}
+		state := "now"
+		if res.Already {
+			state = "already"
+		}
+		return fmt.Sprintf("%s: master is %s %s", f, state, brief(res.Snapshot)), nil
+	})
+}
+
+// pullMenu asks what to pull into the selected folder: master, or a
+// client's latest snapshot.
+func (m Model) pullMenu() (tea.Model, tea.Cmd) {
+	f := m.selected().folder
+	m.dialog = &dialog{
+		title: "Pull " + f.Folder.String(),
+		menu:  []option{{"m", "master"}, {"c", "a client's latest snapshot"}},
+		done: func(m Model, key string) (tea.Model, tea.Cmd) {
+			if key == "m" {
+				return m.askPull(f, "")
+			}
+			var clients []string
+			for _, s := range f.Snapshots {
+				if s.Host != m.client && !slices.Contains(clients, s.Host) {
+					clients = append(clients, s.Host)
+				}
+			}
+			if len(clients) == 0 {
+				m.dialog = message("Pull "+f.Folder.String(), "No other client has snapshots of this folder.")
+				return m, nil
+			}
+			slices.Sort(clients)
+			m.dialog = &dialog{
+				title:   "Pull " + f.Folder.String() + " from which client?",
+				choices: clients,
+				done: func(m Model, client string) (tea.Model, tea.Cmd) {
+					return m.askPull(f, client)
+				},
+			}
+			return m, nil
+		},
+	}
+	return m, nil
+}
+
+// askPull confirms a pull, after finding out where the folder goes if it
+// is not on this client yet.
+func (m Model) askPull(f *app.FolderState, from string) (tea.Model, tea.Cmd) {
+	what := "master"
+	if from != "" {
+		what = "the latest snapshot of " + from
+	}
+	name := f.Folder.String()
+	if f.Dir != "" {
+		m.dialog = &dialog{
+			title:   "Pull " + name + "?",
+			text:    "Takes " + what + " into " + f.Dir + ", if it is ahead of the folder. The folder's current state is saved as a snapshot first.",
+			confirm: true,
+			done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+				return m.start("pulling "+name, "pull "+name, func(ctx context.Context) (string, error) {
+					return pull(ctx, m.back, f.Folder, from)
+				})
+			},
+		}
+		return m, nil
+	}
+	return m.withRoot(f.Folder.Root, func(m Model, rootDir string) (tea.Model, tea.Cmd) {
+		dir := filepath.Join(rootDir, filepath.FromSlash(f.Folder.Path))
+		m.dialog = &dialog{
+			title:   "Pull " + name + "?",
+			text:    "Takes " + what + " into " + dir + ", which is created.",
+			confirm: true,
+			done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+				return m.start("pulling "+name, "pull "+name, func(ctx context.Context) (string, error) {
+					return fetch(ctx, m.back, f.Folder, rootDir, from)
+				})
+			},
+		}
+		return m, nil
+	})
+}
+
+// withRoot goes on with where a root is on this client, asking if this
+// client does not know it yet.
+func (m Model) withRoot(root string, then func(Model, string) (tea.Model, tea.Cmd)) (tea.Model, tea.Cmd) {
+	if dir, ok := m.back.RootDir(root); ok {
+		return then(m, dir)
+	}
+	preset := root
+	if home, err := os.UserHomeDir(); err == nil {
+		preset = filepath.Join(home, root)
+	}
+	ask := &dialog{
+		title:  "Where is " + root + " on this machine?",
+		text:   "Its folders are created under this directory. The answer is remembered.",
+		typing: true,
+		preset: preset,
+	}
+	ask.done = func(m Model, line string) (tea.Model, tea.Cmd) {
+		dir, err := absolute(line)
+		if err == nil {
+			err = m.back.CheckNewRoot(root, dir)
+		}
+		if err != nil {
+			again := *ask
+			again.typed, again.problem = line, err.Error()
+			again.done = ask.done
+			m.dialog = &again
+			return m, nil
+		}
+		return then(m, dir)
+	}
+	m.dialog = ask
+	return m, nil
+}
+
+// absolute turns what was typed into a full path; ~/ is the home directory.
+func absolute(path string) (string, error) {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, rest)
+	}
+	return filepath.Abs(path)
+}
+
+// pull brings the target into a folder that is here, and says how it went.
+func pull(ctx context.Context, back backend, f config.Folder, from string) (string, error) {
+	res, err := back.Pull(ctx, f, from)
+	saved := ""
+	if res.Saved != "" {
+		saved = "; state before saved as " + res.Saved[:8]
+	}
+	if err != nil {
+		return "", err
+	}
+	switch res.Outcome {
+	case app.AlreadyThere:
+		return fmt.Sprintf("%s: already at %s", f, brief(res.Target)), nil
+	case app.AheadOfTarget:
+		return fmt.Sprintf("%s: nothing to pull, this client is ahead of %s", f, brief(res.Target)), nil
+	}
+	return fmt.Sprintf("pulled %s: %s%s", f, brief(res.Target), saved), nil
+}
+
+// fetch brings a folder that is not here into its root's directory.
+func fetch(ctx context.Context, back backend, f config.Folder, rootDir, from string) (string, error) {
+	target, err := back.FindTarget(ctx, f, from)
+	if err != nil {
+		return "", err
+	}
+	res, err := back.Fetch(ctx, f, rootDir, target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("pulled %s into %s: %s", f, res.Dir, brief(res.Target)), nil
+}
+
+// askPullAll confirms pulling master into every folder of the selected
+// root that is behind it or not on this client yet.
+func (m Model) askPullAll() (tea.Model, tea.Cmd) {
+	root := m.selected().root
+	var behind, missing []*app.FolderState
+	for _, f := range m.under(root) {
+		switch {
+		case f.Status == app.Behind:
+			behind = append(behind, f)
+		case f.Status == app.NotHere && f.Master != "":
+			missing = append(missing, f)
+		}
+	}
+	if len(behind)+len(missing) == 0 {
+		m.dialog = message("Pull all of "+root, "Nothing to pull: no folder under it is behind master or missing here.")
+		return m, nil
+	}
+	confirm := func(m Model, rootDir string) (tea.Model, tea.Cmd) {
+		var parts []string
+		if len(behind) > 0 {
+			parts = append(parts, fmt.Sprintf("%d behind master", len(behind)))
+		}
+		if len(missing) > 0 {
+			parts = append(parts, fmt.Sprintf("%d not on this client yet", len(missing)))
+		}
+		total := len(behind) + len(missing)
+		m.dialog = &dialog{
+			title:   fmt.Sprintf("Pull %d folders under %s?", total, root),
+			text:    strings.Join(parts, ", ") + ". Folders that changed here are left alone. Each folder's current state is saved as a snapshot first.",
+			confirm: true,
+			done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+				busy := fmt.Sprintf("pulling %d folders under %s", total, root)
+				return m.start(busy, "pull all of "+root, func(ctx context.Context) (string, error) {
+					var failed []string
+					for _, f := range behind {
+						if _, err := pull(ctx, m.back, f.Folder, ""); err != nil {
+							failed = append(failed, f.Folder.String()+": "+err.Error())
+						}
+					}
+					for _, f := range missing {
+						if _, err := fetch(ctx, m.back, f.Folder, rootDir, ""); err != nil {
+							failed = append(failed, f.Folder.String()+": "+err.Error())
+						}
+					}
+					note := fmt.Sprintf("pulled %d of %d folders under %s", total-len(failed), total, root)
+					if len(failed) > 0 {
+						return note, fmt.Errorf("%d of %d folders failed.\n\n%s", len(failed), total, strings.Join(failed, "\n\n"))
+					}
+					return note, nil
+				})
+			},
+		}
+		return m, nil
+	}
+	if len(missing) == 0 {
+		return confirm(m, "")
+	}
+	return m.withRoot(root, confirm)
+}
+
+// chooseRestore moves into the log, where a snapshot is picked.
+func (m Model) chooseRestore() (tea.Model, tea.Cmd) {
+	if len(m.selected().snapshots()) == 0 {
+		m.note = "there is no snapshot to restore yet"
+		return m, nil
+	}
+	m.focus = log
+	m.note = "choose a snapshot with j and k, then r to restore it; h goes back"
+	return m, nil
+}
+
+// askRestore confirms restoring the folder to the snapshot selected in the log.
+func (m Model) askRestore() (tea.Model, tea.Cmd) {
+	f := m.selected().folder
+	if f == nil || m.logSel >= len(f.Snapshots) {
+		return m, nil
+	}
+	if f.Dir == "" {
+		m.note = "this folder is not on this client; pull it first"
+		return m, nil
+	}
+	s := f.Snapshots[m.logSel]
+	name := f.Folder.String()
+	m.dialog = &dialog{
+		title:   "Restore " + name + "?",
+		text:    "Makes " + f.Dir + " match " + app.Describe(s) + ", whatever state it is in. Its current state is saved as a snapshot first.",
+		confirm: true,
+		done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+			return m.start("restoring "+name, "restore "+name, func(ctx context.Context) (string, error) {
+				res, err := m.back.Restore(ctx, f.Folder, s.ID)
+				if err != nil {
+					return "", err
+				}
+				if res.Already {
+					return fmt.Sprintf("%s: already at %s", name, brief(res.Target)), nil
+				}
+				note := fmt.Sprintf("restored %s to %s", name, res.Target.ID[:8])
+				if res.Undo != "" {
+					note += "; its state before is snapshot " + res.Undo[:8]
+				}
+				return note, nil
+			})
+		},
+	}
+	return m, nil
+}

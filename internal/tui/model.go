@@ -1,5 +1,5 @@
 // Package tui is the terminal interface: the folders on the left, the
-// selected one's log on the right.
+// selected one's log on the right, and keys to act on them.
 package tui
 
 import (
@@ -8,8 +8,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/config"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
+
+// backend is what the interface asks of the client. *app.App is the real
+// one; the tests have their own.
+type backend interface {
+	Survey(ctx context.Context) (app.World, error)
+	Snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error)
+	Push(ctx context.Context, f config.Folder) (app.PushResult, error)
+	Pull(ctx context.Context, f config.Folder, from string) (app.PullResult, error)
+	FindTarget(ctx context.Context, f config.Folder, from string) (app.Target, error)
+	Fetch(ctx context.Context, f config.Folder, rootDir string, t app.Target) (app.PullResult, error)
+	Restore(ctx context.Context, f config.Folder, name string) (app.RestoreResult, error)
+	RootDir(root string) (string, bool)
+	CheckNewRoot(root, dir string) error
+}
 
 type pane int
 
@@ -28,14 +43,16 @@ type row struct {
 type Model struct {
 	client     string
 	repository string
-	survey     func(context.Context) (app.World, error)
+	back       backend
 	theme      Theme
 
 	world   app.World
 	loaded  bool
 	loading bool
-	err     error
-	note    string // a passing remark, shown in the bottom line
+	err     error  // why the repository could not be read
+	note    string // how the last action went, shown in the bottom line
+	busy    string // the action that is running, if one is
+	dialog  *dialog
 
 	rows   []row
 	sel    int // selected row of the folder list
@@ -52,7 +69,7 @@ func New(a *app.App, theme Theme) Model {
 	return Model{
 		client:     a.Config.Client,
 		repository: a.Config.Repository,
-		survey:     a.Survey,
+		back:       a,
 		theme:      theme,
 		loading:    true,
 	}
@@ -65,7 +82,7 @@ type surveyMsg struct {
 
 func (m Model) load() tea.Cmd {
 	return func() tea.Msg {
-		world, err := m.survey(context.Background())
+		world, err := m.back.Survey(context.Background())
 		return surveyMsg{world, err}
 	}
 }
@@ -85,10 +102,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setWorld(msg.world)
 		}
 
+	case doneMsg:
+		// An action finished: say how it went, and look again.
+		m.busy = ""
+		m.note = msg.note
+		if msg.err != nil {
+			m.dialog = message("Could not "+msg.what, msg.err.Error())
+		}
+		m.loading = true
+		return m, m.load()
+
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		if m.dialog != nil {
+			return m.dialog.key(m, msg)
+		}
 		m.note = ""
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "q":
 			return m, tea.Quit
 		case "j", "down":
 			m.move(1)
@@ -105,14 +138,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "h", "left":
 			m.focus = folders
 		case "R":
-			if !m.loading {
+			if !m.loading && m.busy == "" {
 				m.loading = true
 				return m, m.load()
 			}
 		default:
 			for _, a := range m.actions() {
-				if a.key == msg.String() {
-					m.note = "\"" + a.key + "\" (" + a.does + ") is not built yet; this version only shows"
+				if a.key == msg.String() && m.busy == "" {
+					return a.run(m)
 				}
 			}
 		}
@@ -137,6 +170,7 @@ func (m *Model) setWorld(w app.World) {
 	}
 	m.sel = 0
 	for i, r := range m.rows {
+		// A root and a folder cannot share a name: a folder's has a slash.
 		if r.name() == before.name() && r.name() != "" {
 			m.sel = i
 		}
@@ -223,25 +257,3 @@ func (m *Model) scroll() {
 // bodyHeight is the height of the two panes: all but the top and bottom
 // line and the empty line that sets each apart.
 func (m Model) bodyHeight() int { return max(0, m.height-4) }
-
-// action is something a key does to what is selected.
-type action struct {
-	key, does string
-}
-
-// actions are the keys that apply where the selection is now. Only these
-// are offered in the bottom line, and only these do anything.
-func (m Model) actions() []action {
-	r := m.selected()
-	switch {
-	case m.focus == log:
-		return []action{{"r", "restore this snapshot"}}
-	case r.folder == nil && r.root != "":
-		return []action{{"p", "pull all"}}
-	case r.folder == nil:
-		return nil
-	case r.folder.Dir == "":
-		return []action{{"p", "pull"}}
-	}
-	return []action{{"s", "snapshot"}, {"P", "push"}, {"p", "pull"}, {"r", "restore"}}
-}

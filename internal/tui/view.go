@@ -34,22 +34,27 @@ func (m Model) View() string {
 
 	leftLines, rightLines := m.folderLines(left, height), m.logLines(right, height)
 	bar := fg(m.theme.Border).Render("│")
-	var b strings.Builder
+	body := make([]string, height)
+	for i := range body {
+		body[i] = leftLines[i] + bar + rightLines[i]
+	}
+	if m.dialog != nil {
+		body = overlay(body, m.dialog.box(m, m.width), m.width)
+	}
 	// An empty line sets the top and bottom lines apart from the panes.
 	blank := strings.Repeat(" ", m.width)
-	b.WriteString(m.header() + "\n" + blank)
-	for i := 0; i < height; i++ {
-		b.WriteString("\n" + leftLines[i] + bar + rightLines[i])
-	}
-	b.WriteString("\n" + blank + "\n" + m.footer())
-	return b.String()
+	lines := append([]string{m.header(), blank}, body...)
+	return strings.Join(append(lines, blank, m.footer()), "\n")
 }
 
 func (m Model) header() string {
 	title := fg(m.theme.Title).Bold(true).Render(" wipsync")
 	rest := fmt.Sprintf("  %s  %s", m.client, m.repository)
 	state := ""
-	if m.loading {
+	switch {
+	case m.busy != "":
+		state = m.busy + "… "
+	case m.loading:
 		state = "loading… "
 	}
 	room := m.width - lipgloss.Width(title) - runewidth.StringWidth(state)
@@ -74,7 +79,7 @@ func (m Model) footer() string {
 	case m.err != nil:
 		return fg(m.theme.Error).Render(cut(" "+m.err.Error(), m.width))
 	case m.note != "":
-		return fg(m.theme.Changed).Render(cut(" "+m.note, m.width))
+		return fg(m.theme.Ahead).Render(cut(" "+m.note, m.width))
 	case m.world.MasterErr != nil:
 		return fg(m.theme.Error).Render(cut(" master is unknown: "+m.world.MasterErr.Error(), m.width))
 	}

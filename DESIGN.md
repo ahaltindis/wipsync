@@ -5,8 +5,9 @@ files and `.git`, through an always-on home server.
 
 Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log` and `doctor` work. Pull
 does not merge yet: when both sides changed it stops, and `restore` takes one side as it is. `diff`
-and the background service are not built yet. `wipsync tui` shows the folders and their snapshots;
-it cannot act on them yet.
+and the background service are not built yet. `wipsync tui` shows the folders and their snapshots
+and runs snapshot, push, pull and restore on them; its directory browser, for adding folders, is not
+built yet.
 
 ## Model
 
@@ -67,7 +68,9 @@ Compared per file against the common base snapshot:
   to check the setup. Written in Go with cobra.
 - **TUI**: `wipsync tui`, in the same binary, built with Bubble Tea. Folders under their roots on
   the left, coloured by what is due (snapshot, push, pull); the selected folder's snapshots on the
-  right. Colours come from `theme.toml` beside the config.
+  right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest;
+on a root, everything under it), `r` restore. Pull and restore ask first. Colours come from
+`theme.toml` beside the config.
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to
   restic as is.
