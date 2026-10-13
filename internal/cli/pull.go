@@ -47,19 +47,11 @@ for its location once and remembers it.`,
 			if len(args) == 1 {
 				arg = args[0]
 			}
-			p := &puller{cfgPath: cfgPath, cfg: cfg, ctx: cmd.Context(), out: cmd.OutOrStdout(), from: from}
-			if p.client, err = resticClient(cfgPath, cfg); err != nil {
+			p, err := newPuller(cmd, cfgPath, cfg)
+			if err != nil {
 				return err
 			}
-			if p.pointers, err = master.Open(cfg.Repository); err != nil {
-				return err
-			}
-			if err := restic.CheckVersion(p.ctx); err != nil {
-				return err
-			}
-			if p.store, err = state.Default(); err != nil {
-				return err
-			}
+			p.from = from
 
 			if f, err := resolveFolder(cfg, arg); err == nil {
 				if rootFlag != "" {
@@ -92,6 +84,24 @@ type puller struct {
 	client   *restic.Client
 	pointers master.Pointers
 	store    *state.Store
+}
+
+func newPuller(cmd *cobra.Command, cfgPath string, cfg *config.Config) (*puller, error) {
+	p := &puller{cfgPath: cfgPath, cfg: cfg, ctx: cmd.Context(), out: cmd.OutOrStdout()}
+	var err error
+	if p.client, err = resticClient(cfgPath, cfg); err != nil {
+		return nil, err
+	}
+	if p.pointers, err = master.Open(cfg.Repository); err != nil {
+		return nil, err
+	}
+	if err := restic.CheckVersion(p.ctx); err != nil {
+		return nil, err
+	}
+	if p.store, err = state.Default(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // target returns the snapshot to pull, whether it is master, and all of
@@ -223,14 +233,24 @@ func (p *puller) existing(f config.Folder) error {
 			since = "snapshot " + common[:8]
 		}
 		return fmt.Errorf("%s: both this folder and %s changed since %s. "+
-			"Pull cannot merge yet and changed nothing; the folder's state is saved as snapshot %s",
-			f, describe(target), since, base[:8])
+			"Pull cannot merge yet and changed nothing; the folder's state is saved as snapshot %s. "+
+			"To take the other side as it is: wipsync restore %s",
+			f, describe(target), since, base[:8], target.ID[:8])
 	}
+	if err := p.apply(&f, target, isMaster, base); err != nil {
+		return err
+	}
+	fmt.Fprintf(p.out, "pulled %s: %s\n", f, describe(target))
+	return nil
+}
 
-	// The target is ahead: make the folder match it. Paths ignored on
-	// either side are left alone, so that nothing a client keeps out of
-	// its snapshots is deleted here.
-	dir := p.cfg.Dir(f)
+// apply makes the folder match the target snapshot and records that. base
+// is the snapshot holding the folder's state from before, for the message
+// if it fails halfway. f is updated when its ignore rules change.
+func (p *puller) apply(f *config.Folder, target restic.Snapshot, isMaster bool, base string) error {
+	// Paths ignored on either side are left alone, so that nothing a
+	// client keeps out of its snapshots is deleted here.
+	dir := p.cfg.Dir(*f)
 	excludes := slices.Clone(f.Ignore)
 	for _, e := range target.Excludes {
 		if !slices.Contains(excludes, e) {
@@ -238,7 +258,7 @@ func (p *puller) existing(f config.Folder) error {
 		}
 	}
 	if _, err := p.client.Restore(p.ctx, restic.RestoreOptions{ID: target.ID, Dir: dir, Excludes: excludes}); err != nil {
-		return fmt.Errorf("%w. %s may be partly updated; its state before the pull is snapshot %s", err, dir, base[:8])
+		return fmt.Errorf("%w. %s may be partly updated; its state from before is snapshot %s", err, dir, base[:8])
 	}
 
 	// From here on the folder follows the rules its snapshot was taken with.
@@ -249,7 +269,7 @@ func (p *puller) existing(f config.Folder) error {
 				if p.cfg.Folders[i].Ignore == nil {
 					p.cfg.Folders[i].Ignore = []string{}
 				}
-				f = p.cfg.Folders[i]
+				*f = p.cfg.Folders[i]
 			}
 		}
 		if err := p.cfg.Save(p.cfgPath); err != nil {
@@ -257,11 +277,7 @@ func (p *puller) existing(f config.Folder) error {
 		}
 		fmt.Fprintf(p.out, "%s: its ignore rules are now %s\n", f, strings.Join(f.Ignore, ", "))
 	}
-	if err := p.record(f, dir, target, isMaster); err != nil {
-		return err
-	}
-	fmt.Fprintf(p.out, "pulled %s: %s\n", f, describe(target))
-	return nil
+	return p.record(*f, dir, target, isMaster)
 }
 
 // descends reports whether snapshot id has ancestor somewhere up its chain

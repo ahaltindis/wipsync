@@ -3,9 +3,9 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `log` and `doctor` work. Pull does not
-merge yet: when both sides changed it stops. `restore`, `diff`, the background service and packaging
-are not built yet.
+Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log` and `doctor` work. Pull
+does not merge yet: when both sides changed it stops, and `restore` takes one side as it is. `diff`,
+the background service and packaging are not built yet.
 
 ## Model
 
@@ -28,7 +28,8 @@ are not built yet.
 
 - A push is accepted only if master is still where this client last saw it: the snapshot it last
   pushed or pulled. Otherwise pull first.
-- Before a pull changes anything, the local state is saved as a WIP snapshot, so every pull can be undone.
+- Before a pull or a restore changes anything, the local state is saved as a WIP snapshot, so both
+  can be undone with `restore`.
 - When another client has newer WIP or master moved, the client notifies. It never pulls by itself.
 - Change detection uses snapshots and parents, not mtime (clocks differ, git rewrites mtimes).
 - A WIP snapshot may catch a folder mid-save or mid-rebase. The next one corrects it; push at a quiet moment.
