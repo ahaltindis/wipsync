@@ -59,42 +59,47 @@ clients, diff, restore, pruning, encrypted on the server, only needs ssh.
 
 How wipsync uses it:
 
-- Snapshot: `backup --host <client> --skip-if-unchanged`, with the folder's ignore rules.
-- Parent: restic records one per snapshot. After a pull, the next snapshot names the pulled one with
-  `--parent`, also when it is another client's.
-- Restore: `restore <id>:<folder> --delete`, with the same ignore rules. The folder's own mode and
-  mtime are not restored.
+- Snapshot: from inside the folder, `backup . --host <client> --parent <base> --skip-if-unchanged`,
+  with the folder's ignore rules. With an absolute path the snapshot includes the directories above
+  the folder, and a change beside the folder makes a new snapshot.
+- Parent: always passed with `--parent`, also when it is another client's snapshot. restic's own
+  choice goes by host and path only.
+- Restore: `restore <id> --target <folder> --delete`, with the same ignore rules. The folder's own
+  mode and mtime are not restored.
+- After a pull every file has a new ctime and inode. The next snapshot passes `--ignore-ctime
+  --ignore-inode` so files are not reread; it is still saved, with unchanged content.
 - master: a file per folder next to the repository, holding a snapshot ID. Only the server command
   writes it, under a lock: move it if it still equals the caller's base, otherwise reject.
 - Not tags: changing a tag gives the snapshot a new ID and leaves other snapshots' parents pointing
   at the old one.
-- Not tree hashes for "same state": directory timestamps change them, including directories above
-  the folder.
+- Not tree hashes for "same state": they cover each file's ctime and inode, which differ on every
+  machine. Compare with `diff`.
 
 ### Prototype (2026-10-12)
 
-restic 0.19.1, local disk, warm cache, single runs. One folder: 636 MiB in 3811 files; its `.venv`
-holds 3559 of them and nearly all the size.
+restic 0.19.1, warm cache. Local disk, and over ssh to a server 7 ms away. One folder: 636 MiB in
+3811 files; its `.venv` holds 3559 of them and nearly all the size.
 
-| Measured | Result |
-|---|---|
-| First snapshot | 4.4s, stored as 231M |
-| Snapshot, nothing changed | 0.84s, nothing uploaded |
-| Snapshot after a small change | 0.91s, 5 KB stored |
-| Snapshot without `.venv` | 0.68s |
-| Restore into an empty directory | 3.3s, identical |
-| Restore over a drifted folder | 2.2s, identical, `.git` included |
-| Restore of a snapshot without `.venv` | deletes the local `.venv` unless excluded on restore too |
-| Second client, same content | 1.9s, 3 KB added |
-| Two clients at once | both succeed, `restic check` clean |
-| 20 pushes racing on the master file | 1 accepted, 19 rejected, in 50 of 50 rounds |
+| Measured | Local | Over ssh | Result |
+|---|---|---|---|
+| First snapshot | 4.4s | 7.0s | stored as 231M |
+| Snapshot, nothing changed | 0.84s | 1.2s | nothing uploaded |
+| Snapshot after a small change | 0.91s | 1.3s | a few KB stored |
+| Snapshot without `.venv` | 0.68s | 1.1s | |
+| Restore into an empty directory | 3.3s | 5.6s | identical |
+| Restore over a drifted folder | 2.2s | 2.5s | identical, `.git` included |
+| Restore of a snapshot without `.venv` | | | deletes the local `.venv` unless excluded on restore too |
+| Change beside the folder, none inside | | | absolute path: new snapshot. Relative: skipped |
+| First snapshot after a pull | 1.8s, 0.7s ignoring ctime and inode | | saved either way, 357 KiB |
+| Second client, same content | 1.9s | | 3 KB added |
+| Two clients at once | | | both succeed, `restic check` clean |
+| 20 pushes racing on the master file | | | 1 accepted, 19 rejected, in 50 of 50 rounds |
 
 Still to verify:
 
-1. The same over ssh, with a cold cache, and on a much larger folder.
+1. With a cold cache, on a much larger folder, and over a slow link.
 2. Pruning while clients write (it takes an exclusive lock).
-3. Snapshots with relative paths, so directories above the folder stay out.
-4. Changing an ignore rule after snapshots exist.
+3. Changing an ignore rule after snapshots exist.
 
 Fallback: rsync over ssh with hard-link snapshots on the server.
 
