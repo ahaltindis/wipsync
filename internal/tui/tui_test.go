@@ -959,3 +959,47 @@ func TestAdd(t *testing.T) {
 		t.Errorf("unexpected box: %s", asks(m))
 	}
 }
+
+// The current directory in the top line marks the root and the tracked
+// folder it is in.
+func TestPathParts(t *testing.T) {
+	m, _, home := browsing(t)
+	m = keys(t, m, "tab")
+	cases := []struct {
+		path string
+		want []pathPart
+	}{
+		{home, []pathPart{{"~", partPlain}}},
+		{home + "/other/Projects", []pathPart{{"~/other/Projects", partPlain}}},
+		{home + "/Projects", []pathPart{{"~/", partPlain}, {"Projects", partRoot}}},
+		{home + "/Projects/aha", []pathPart{{"~/", partPlain}, {"Projects", partRoot}, {"/aha", partPlain}}},
+		{home + "/Projects/aha/archype/src", []pathPart{
+			{"~/", partPlain}, {"Projects", partRoot}, {"/aha/", partPlain}, {"archype", partTracked}, {"/src", partPlain}}},
+		{home + "/notes/journal", []pathPart{{"~/", partPlain}, {"notes", partRoot}, {"/", partPlain}, {"journal", partTracked}}},
+		{"/", []pathPart{{"/", partPlain}}},
+		{"/usr/share", []pathPart{{"/usr/share", partPlain}}},
+	}
+	for _, tc := range cases {
+		if got := m.pathParts(tc.path); !slices.Equal(got, tc.want) {
+			t.Errorf("pathParts(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+
+	// On screen it reads as the plain path, and a long one is cut to fit.
+	m = keys(t, m, "l") // into archype
+	if top := strings.Split(m.View(), "\n")[0]; !strings.Contains(top, "wipsync  ~/Projects/aha/archype ") {
+		t.Errorf("top line = %q", top)
+	}
+	// The end of the path is what is kept.
+	m = send(t, m, tea.WindowSizeMsg{Width: 30, Height: 10})
+	top := strings.Split(m.View(), "\n")[0]
+	if w := runewidth.StringWidth(top); w != 30 || !strings.Contains(top, "wipsync  …") || !strings.HasSuffix(strings.TrimRight(top, " "), "/aha/archype") {
+		t.Errorf("top line in a narrow window is %d cells: %q", w, top)
+	}
+	for _, width := range []int{8, 11, 12, 13, 20} {
+		m = send(t, m, tea.WindowSizeMsg{Width: width, Height: 10})
+		if w := runewidth.StringWidth(strings.Split(m.View(), "\n")[0]); w != width {
+			t.Errorf("top line at width %d is %d cells", width, w)
+		}
+	}
+}

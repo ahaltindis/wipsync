@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/ahaltindis/wipsync/internal/app"
@@ -55,10 +56,6 @@ func (m Model) View() string {
 
 func (m Model) header() string {
 	title := fg(m.theme.Title).Bold(true).Render(" wipsync")
-	rest := fmt.Sprintf("  %s  %s", m.client, m.repository)
-	if m.view == files {
-		rest = "  " + short(m.br.dir)
-	}
 	state := ""
 	switch {
 	case m.busy != "":
@@ -67,7 +64,36 @@ func (m Model) header() string {
 		state = "loading… "
 	}
 	room := m.width - lipgloss.Width(title) - runewidth.StringWidth(state)
-	return title + fg(m.theme.Dim).Render(cut(rest, room)+state)
+	if m.view != files {
+		rest := fmt.Sprintf("  %s  %s", m.client, m.repository)
+		return title + fg(m.theme.Dim).Render(cut(rest, room)+state)
+	}
+	// The current directory, with the root and the tracked folder it is in
+	// drawn as they are in the listing.
+	path := ""
+	for _, part := range m.pathParts(m.br.dir) {
+		style := fg(m.theme.Dim)
+		switch part.kind {
+		case partRoot:
+			style = fg(m.theme.Root).Bold(true)
+		case partTracked:
+			style = fg(m.theme.Tracked).Bold(true)
+		}
+		path += style.Render(part.text)
+	}
+	// A path too long for the line loses its start, not the directory
+	// being looked at.
+	room -= 2
+	if over := lipgloss.Width(path) - room; over > 0 && room > 1 {
+		path = fg(m.theme.Dim).Render("…") + ansi.TruncateLeft(path, over+1, "")
+	} else if room <= 1 {
+		path = ""
+	}
+	if pad := room - lipgloss.Width(path); pad > 0 {
+		path += strings.Repeat(" ", pad)
+	}
+	// In a window too narrow even for the title, the line is simply cut.
+	return ansi.Truncate(title+"  "+path+fg(m.theme.Dim).Render(state), m.width, "")
 }
 
 func (m Model) footer() string {

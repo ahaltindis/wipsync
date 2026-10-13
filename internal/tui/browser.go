@@ -311,3 +311,63 @@ func short(path string) string {
 	}
 	return path
 }
+
+// partKind is what a piece of a path is to wipsync.
+type partKind int
+
+const (
+	partPlain partKind = iota
+	partRoot
+	partTracked
+)
+
+// pathPart is a piece of a path as it is written, and what it is.
+type pathPart struct {
+	text string
+	kind partKind
+}
+
+// pathParts splits a path into pieces for drawing, with the home directory
+// as ~. The name of a root's directory and of a tracked folder's directory
+// are pieces of their own; what lies between is plain.
+func (m Model) pathParts(path string) []pathPart {
+	var parts []pathPart
+	plain := func(text string) {
+		if n := len(parts); n > 0 && parts[n-1].kind == partPlain {
+			parts[n-1].text += text
+		} else {
+			parts = append(parts, pathPart{text: text})
+		}
+	}
+	// Each directory on the way down, with its full path.
+	var names, fulls []string
+	for p := path; ; p = filepath.Dir(p) {
+		if p == filepath.Dir(p) {
+			break
+		}
+		names, fulls = append([]string{filepath.Base(p)}, names...), append([]string{p}, fulls...)
+	}
+	start := 0
+	if home, err := os.UserHomeDir(); err == nil && home != "/" {
+		if i := slices.Index(fulls, home); i >= 0 {
+			plain("~")
+			start = i + 1
+		}
+	}
+	if start == 0 && len(names) == 0 {
+		plain("/")
+	}
+	for i := start; i < len(names); i++ {
+		plain("/")
+		folder, root := m.kind(fulls[i])
+		switch {
+		case root != "":
+			parts = append(parts, pathPart{names[i], partRoot})
+		case folder != nil:
+			parts = append(parts, pathPart{names[i], partTracked})
+		default:
+			plain(names[i])
+		}
+	}
+	return parts
+}
