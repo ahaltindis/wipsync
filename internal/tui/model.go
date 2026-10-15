@@ -186,6 +186,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key == "q":
 			return m, tea.Quit
+		case key == "?":
+			m.dialog = m.help(m.width)
+			return m, nil
 		case key == "tab":
 			if m.view == tracked {
 				m.openBrowser()

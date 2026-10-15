@@ -48,13 +48,22 @@ func (m Model) View() string {
 	for i := range body {
 		body[i] = leftLines[i] + bar + rightLines[i]
 	}
-	if m.dialog != nil {
-		body = overlay(body, m.dialog.box(m, m.width), m.width)
-	}
 	// An empty line sets the top and bottom lines apart from the panes.
 	blank := strings.Repeat(" ", m.width)
+	var box []string
+	if m.dialog != nil {
+		box = m.dialog.box(m, m.width)
+		if len(box) <= len(body) {
+			body = overlay(body, box, m.width)
+		}
+	}
 	lines := append([]string{m.header(), blank}, body...)
-	return strings.Join(append(lines, blank, m.footer()), "\n")
+	lines = append(lines, blank, m.footer())
+	if len(box) > len(body) {
+		// Too tall for the panes: it covers the top and bottom lines too.
+		lines = overlay(lines, box, m.width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) header() string {
@@ -110,52 +119,8 @@ func (m Model) footer() string {
 		room := m.width - runewidth.StringWidth(line)
 		return fg(m.theme.Title).Render(line) + fg(m.theme.Dim).Render(cut(hint, room))
 	}
-	// Only what can be done from here is offered. What is always there
-	// comes last, where a narrow window cuts first.
-	var groups []string
-	e, _ := m.entry()
-	switch {
-	case m.view == files && e.dir:
-		groups = append(groups, "h up  l open")
-	case m.view == files:
-		groups = append(groups, "h up")
-	case m.focus == log:
-		groups = append(groups, "h folders")
-	case len(m.selected().snapshots()) > 0:
-		groups = append(groups, "l log")
-	}
-	k := m.marked()
-	marking := k.any() && m.focus == folders
-	var acts []string
-	if marking {
-		acts = append(acts, fmt.Sprintf("%d marked:", len(k.folders)+len(k.dirs)))
-	}
-	for _, a := range m.actions() {
-		acts = append(acts, a.key+" "+a.does)
-	}
-	if len(acts) > 0 {
-		groups = append(groups, strings.Join(acts, "  "))
-	}
-	var view []string
-	switch {
-	case marking:
-		view = append(view, "space mark", "esc unmark all")
-	case m.focus == folders && (m.view == tracked || e.dir):
-		view = append(view, "space mark")
-	}
-	if m.focus == folders {
-		view = append(view, "/ search")
-		if m.lastQuery != "" {
-			view = append(view, "n next")
-		}
-	}
-	if m.view == files {
-		view = append(view, ". hidden", "tab folders")
-	} else {
-		view = append(view, "tab browse")
-	}
-	groups = append(groups, strings.Join(view, "  "), "j/k move  R refresh  q quit")
-	keys := " " + strings.Join(groups, "    ")
+	// The keys themselves are in the help.
+	keys := " ? help  q quit"
 	switch {
 	case m.err != nil:
 		return fg(m.theme.Error).Render(cut(" "+m.err.Error(), m.width))

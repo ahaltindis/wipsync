@@ -14,6 +14,7 @@ import (
 type dialog struct {
 	title string
 	text  string
+	lines []string // drawn as they are, under the text
 
 	menu    []option // each chosen by its own key
 	choices []string // chosen with j, k and enter
@@ -116,6 +117,12 @@ func (d *dialog) box(m Model, width int) []string {
 	body = append(body, fg(m.theme.Title).Bold(true).Render(ansi.Truncate(d.title, inner, "…")))
 	if d.text != "" {
 		body = append(body, "", wrap.Render(d.text))
+	}
+	if d.lines != nil {
+		body = append(body, "")
+		for _, l := range d.lines {
+			body = append(body, ansi.Truncate(l, inner, "…"))
+		}
 	}
 	hint := "any key to close"
 	switch {

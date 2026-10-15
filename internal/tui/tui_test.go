@@ -185,6 +185,20 @@ func asks(m Model) string {
 	return m.dialog.title + " | " + m.dialog.text + " | " + m.dialog.problem
 }
 
+// usable lists the keys the help shows as doing something here.
+func usable(m Model) string {
+	var out []string
+	left, right := m.hints()
+	for _, g := range append(left, right...) {
+		for _, h := range g.hints {
+			if h.usable {
+				out = append(out, h.key+" "+h.does)
+			}
+		}
+	}
+	return strings.Join(out, "  ")
+}
+
 func bottom(m Model) string {
 	lines := strings.Split(m.View(), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
@@ -237,7 +251,7 @@ func TestScreen(t *testing.T) {
 		"/home/u/Projects/aha/archype",
 		"in step with master",
 		"b1b1b1b1  2026-10-13 10:30  desktop    master  base",
-		"l log    s snapshot  P push  p pull  r restore  o here  O window    space mark",
+		" ? help  q quit",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -320,24 +334,62 @@ func TestPanes(t *testing.T) {
 	}
 }
 
-// The bottom line offers only what applies to the selection, and only
-// those keys do anything.
+// The help offers only what applies to the selection, and only those keys
+// do anything.
 func TestHints(t *testing.T) {
-	m, _ := started(t, 140, 16)
+	m, _ := started(t, 140, 30)
+	move := "j/k down / up  g/G top / bottom"
 	cases := []struct {
 		name  string
 		typed []string
+		where string
 		want  string
 	}{
-		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore  o here  O window    space mark  / search  tab browse    j/k move  R refresh  q quit"},
-		{"a folder that is not here", []string{"j"}, "l log    p pull    space mark  / search  tab browse    j/k move  R refresh  q quit"},
-		{"a root", []string{"g"}, "p pull all  o here  O window    space mark  / search  tab browse    j/k move  R refresh  q quit"},
-		{"a snapshot in the log", []string{"j", "l"}, "h folders    r restore this snapshot  o here  O window    tab browse    j/k move  R refresh  q quit"},
+		{"a folder that is here", nil, "Folder · Projects/aha/archype",
+			"s snapshot  P push  p pull  r restore  o open here  O open in window  R refresh  ? help  q quit  " + move + "  l log  tab browse  space mark  / search"},
+		{"a folder that is not here", []string{"j"}, "Folder · Projects/aha/website",
+			"p pull  R refresh  ? help  q quit  " + move + "  l log  tab browse  space mark  / search"},
+		{"a root", []string{"g"}, "Root · Projects",
+			"p pull all  o open here  O open in window  R refresh  ? help  q quit  " + move + "  tab browse  space mark  / search"},
+		{"a snapshot in the log", []string{"j", "l"}, "Log · Projects/aha/archype · b1b1b1b1",
+			"r restore this snapshot  o open here  O open in window  R refresh  ? help  q quit  " + move + "  h folders  tab browse"},
 	}
 	for _, tc := range cases {
 		m = keys(t, m, tc.typed...)
-		if got := bottom(m); got != tc.want {
+		if got := usable(m); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+		if got := m.where(); got != tc.where {
+			t.Errorf("%s: help is about %q, want %q", tc.name, got, tc.where)
+		}
+		if got := bottom(m); got != "? help  q quit" {
+			t.Errorf("%s: bottom line = %q", tc.name, got)
+		}
+	}
+	// ? opens the help over the panes, with every key in it; any key closes it.
+	m = keys(t, m, "?")
+	screen := m.View()
+	t.Logf("the help:\n%s", screen)
+	for _, want := range []string{"Keys", "Log · Projects/aha/archype · b1b1b1b1", "Actions", "Move", "General", "Marks and search",
+		"s     snapshot", "r     restore this snapshot", "n/N   next / previous match"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the help lacks %q", want)
+		}
+	}
+	if m = keys(t, m, "j"); m.dialog != nil {
+		t.Error("a key does not close the help")
+	}
+	// In a small terminal it covers the top and bottom lines rather than
+	// lose its own.
+	m = keys(t, send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24}), "?")
+	lines := strings.Split(m.View(), "\n")
+	t.Logf("the help at 80x24:\n%s", strings.Join(lines, "\n"))
+	if len(lines) != 24 || !strings.Contains(lines[0]+lines[1], "╭") || !strings.Contains(m.View(), "any key to close") {
+		t.Errorf("the help does not fit in 80x24: %d lines", len(lines))
+	}
+	for i, line := range lines {
+		if w := runewidth.StringWidth(line); w != 80 {
+			t.Errorf("line %d is %d cells wide", i, w)
 		}
 	}
 	// A key that is not offered does nothing: s in the log, a anywhere.
@@ -752,11 +804,16 @@ func TestBrowser(t *testing.T) {
 		" archype/", "tracked", " wipsync/", "behind",
 		// A tracked directory shows what the folder list would: its log.
 		"Projects/aha/archype", "in step with master", "b1b1b1b1",
-		"h up  l open    s snapshot  P push  p pull  o here  O window    space mark  / search  . hidden",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
 		}
+	}
+	if got, want := usable(m), "s snapshot  P push  p pull  o open here  O open in window  R refresh  ? help  q quit  j/k down / up  g/G top / bottom  l open  h up  tab folders  space mark  / search  . hidden files"; got != want {
+		t.Errorf("on a tracked directory the help offers\n %q, want\n %q", got, want)
+	}
+	if got := m.where(); got != "Browser · ~/Projects/aha/archype" {
+		t.Errorf("help is about %q", got)
 	}
 
 	// Up a level: the directory we came from is selected, and previewed.
@@ -766,10 +823,13 @@ func TestBrowser(t *testing.T) {
 	if m.br.dir != filepath.Join(home, "Projects") || m.path() != filepath.Join(home, "Projects/aha") {
 		t.Fatalf("after h: at %q on %q", m.br.dir, m.path())
 	}
-	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add  o here  O window    space mark  / search  . hidden"} {
+	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
 		}
+	}
+	if got, want := usable(m), "a add  o open here  O open in window  R refresh  ? help  q quit  j/k down / up  g/G top / bottom  l open  h up  tab folders  space mark  / search  . hidden files"; got != want {
+		t.Errorf("on a directory the help offers\n %q, want\n %q", got, want)
 	}
 	if strings.Contains(screen, ".cache") {
 		t.Error("a hidden directory is shown")
@@ -783,7 +843,7 @@ func TestBrowser(t *testing.T) {
 	m = keys(t, m, "h")
 	screen = m.View()
 	if m.path() != filepath.Join(home, "Projects") || !strings.Contains(screen, " Projects/") || !strings.Contains(screen, "root") ||
-		!strings.Contains(screen, "2 folders") || !strings.Contains(screen, "p pull all") {
+		!strings.Contains(screen, "2 folders") || !strings.Contains(usable(m), "p pull all") {
 		t.Errorf("the root is not shown as one:\n%s", screen)
 	}
 	// Directories come before files, each in order.
@@ -801,8 +861,8 @@ func TestBrowser(t *testing.T) {
 	if m.path() != filepath.Join(home, "todo.txt") {
 		t.Fatalf("G went to %q", m.path())
 	}
-	if got := bottom(m); got != "h up    o here  O window    / search  . hidden  tab folders    j/k move  R refresh  q quit" {
-		t.Errorf("bottom line on a file = %q", got)
+	if got, want := usable(m), "o open here  O open in window  R refresh  ? help  q quit  j/k down / up  g/G top / bottom  h up  tab folders  / search  . hidden files"; got != want {
+		t.Errorf("on a file the help offers\n %q, want\n %q", got, want)
 	}
 	if !strings.Contains(m.View(), "6 B, changed ") {
 		t.Errorf("a file's details are missing:\n%s", m.View())
@@ -948,16 +1008,16 @@ func TestMarkingFolders(t *testing.T) {
 		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
 	}
 	// archype is here and website is not: one to snapshot or push, two to pull.
-	if got, want := bottom(m), "l log    2 marked:  s snapshot 1  P push 1  p pull 2    space mark  esc unmark all  / search  tab browse"; !strings.HasPrefix(got, want) {
-		t.Errorf("bottom line:\n got %q\nwant %q", got, want)
+	if got, want := usable(m), "s snapshot 1  P push 1  p pull 2  R refresh  ? help  q quit  j/k down / up  g/G top / bottom  l log  tab browse  space mark  esc unmark all  / search"; got != want || m.where() != "2 marked" {
+		t.Errorf("the help, about %q:\n got %q\nwant %q", m.where(), got, want)
 	}
 	// Space again unmarks.
 	if un := keys(t, m, "k", " "); len(un.marked().folders) != 1 {
 		t.Errorf("%d marked after unmarking one", len(un.marked().folders))
 	}
 	// The log keeps its own keys while it has the focus.
-	if in := keys(t, m, "l"); !strings.Contains(bottom(in), "r restore this snapshot") || strings.Contains(bottom(in), "marked") {
-		t.Errorf("in the log with marks: %q", bottom(in))
+	if in := keys(t, m, "l"); !strings.Contains(usable(in), "r restore this snapshot") || strings.Contains(in.where(), "marked") {
+		t.Errorf("in the log with marks, about %q: %q", in.where(), usable(in))
 	}
 
 	m = keys(t, m, " ") // wipsync too
@@ -1059,8 +1119,8 @@ func TestMarkingInBrowser(t *testing.T) {
 	if !strings.Contains(screen, "┃new-thing/") || !strings.Contains(screen, "┃one/") || !strings.Contains(screen, "┃two/") || strings.Contains(screen, "┃three/") {
 		t.Errorf("the marks are not drawn where they belong:\n%s", screen)
 	}
-	if !strings.Contains(bottom(m), "3 marked:  a add 3    space mark  esc unmark all  / search  . hidden  tab folders") {
-		t.Errorf("bottom line = %q", bottom(m))
+	if got := usable(m); m.where() != "3 marked" || !strings.HasPrefix(got, "a add 3  R refresh") || !strings.Contains(got, "space mark  esc unmark all  / search  . hidden files") {
+		t.Errorf("the help, about %q: %q", m.where(), got)
 	}
 	// Marks stay while moving around, and other views have their own.
 	m = keys(t, m, "h", "l")
@@ -1095,8 +1155,8 @@ func TestMarkingInBrowser(t *testing.T) {
 	m = keys(t, m, " ")
 	m.browse(projects, "three")
 	m = keys(t, m, " ")
-	if !strings.Contains(bottom(m), "2 marked:  s snapshot 1  P push 1  p pull 1  a add 1") {
-		t.Errorf("bottom line = %q", bottom(m))
+	if got := usable(m); m.where() != "2 marked" || !strings.HasPrefix(got, "s snapshot 1  P push 1  p pull 1  a add 1  R refresh") {
+		t.Errorf("the help, about %q: %q", m.where(), got)
 	}
 	// A file is not marked, and space still moves on.
 	m.browse(home, "todo.txt")
@@ -1188,8 +1248,8 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("after es: on %q", m.selected().name())
 	}
 	m = keys(t, m, "enter")
-	if m.search != nil || m.selected().name() != "notes" || !strings.Contains(bottom(m), "/ search  n next") {
-		t.Errorf("after enter: on %q, bottom %q", m.selected().name(), bottom(m))
+	if m.search != nil || m.selected().name() != "notes" || !strings.Contains(usable(m), "/ search  n/N next / previous match") {
+		t.Errorf("after enter: on %q, help %q", m.selected().name(), usable(m))
 	}
 	var seen []string
 	for range 4 {
@@ -1257,8 +1317,8 @@ func TestOpenWindow(t *testing.T) {
 	m.byDir = nil
 	m = goTo(t, m, "Projects/aha/wipsync")
 	m.selected().folder.Dir = dir
-	if !strings.Contains(bottom(m), "o here  O window") {
-		t.Errorf("o and O are not offered:\n%s", bottom(m))
+	if !strings.Contains(usable(m), "o open here  O open in window") {
+		t.Errorf("o and O are not offered: %q", usable(m))
 	}
 	next, cmd := m.Update(keyMsg("O"))
 	if cmd == nil {
@@ -1283,7 +1343,7 @@ func TestOpenWindow(t *testing.T) {
 
 	// A folder not on this client has nothing to open.
 	m = goTo(t, keys(t, m, "q"), "Projects/aha/website")
-	if strings.Contains(bottom(m), "o here") {
-		t.Errorf("o is offered for a folder not here:\n%s", bottom(m))
+	if strings.Contains(usable(m), "open here") {
+		t.Errorf("o is offered for a folder not here: %q", usable(m))
 	}
 }

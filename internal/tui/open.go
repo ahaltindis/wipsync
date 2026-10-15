@@ -39,7 +39,7 @@ func (m Model) openActions() []action {
 	if m.openDir() == "" {
 		return nil
 	}
-	return []action{{"o", "here", Model.openHere}, {"O", "window", Model.openWindow}}
+	return []action{{"o", "open here", Model.openHere}, {"O", "open in window", Model.openWindow}}
 }
 
 // opener runs a command from the config on a directory.
