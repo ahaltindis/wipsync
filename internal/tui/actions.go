@@ -25,10 +25,15 @@ type action struct {
 // actions are the keys that apply where the selection is now. Only these
 // are offered in the bottom line, and only these do anything.
 func (m Model) actions() []action {
-	r := m.selected()
 	if k := m.marked(); k.any() && m.focus == folders {
 		return m.markedActions(k)
 	}
+	return append(m.selectionActions(), m.openActions()...)
+}
+
+// selectionActions are what can be done to the selected folder or root.
+func (m Model) selectionActions() []action {
+	r := m.selected()
 	if m.view == files {
 		e, ok := m.entry()
 		switch {

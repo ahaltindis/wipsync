@@ -237,7 +237,7 @@ func TestScreen(t *testing.T) {
 		"/home/u/Projects/aha/archype",
 		"in step with master",
 		"b1b1b1b1  2026-10-13 10:30  desktop    master  base",
-		"l log    s snapshot  P push  p pull  r restore    space mark  / search  tab browse",
+		"l log    s snapshot  P push  p pull  r restore  o here  O window    space mark",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -323,16 +323,16 @@ func TestPanes(t *testing.T) {
 // The bottom line offers only what applies to the selection, and only
 // those keys do anything.
 func TestHints(t *testing.T) {
-	m, _ := started(t, 120, 16)
+	m, _ := started(t, 140, 16)
 	cases := []struct {
 		name  string
 		typed []string
 		want  string
 	}{
-		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore    space mark  / search  tab browse    j/k move  R refresh  q quit"},
+		{"a folder that is here", nil, "l log    s snapshot  P push  p pull  r restore  o here  O window    space mark  / search  tab browse    j/k move  R refresh  q quit"},
 		{"a folder that is not here", []string{"j"}, "l log    p pull    space mark  / search  tab browse    j/k move  R refresh  q quit"},
-		{"a root", []string{"g"}, "p pull all    space mark  / search  tab browse    j/k move  R refresh  q quit"},
-		{"a snapshot in the log", []string{"j", "l"}, "h folders    r restore this snapshot    tab browse    j/k move  R refresh  q quit"},
+		{"a root", []string{"g"}, "p pull all  o here  O window    space mark  / search  tab browse    j/k move  R refresh  q quit"},
+		{"a snapshot in the log", []string{"j", "l"}, "h folders    r restore this snapshot  o here  O window    tab browse    j/k move  R refresh  q quit"},
 	}
 	for _, tc := range cases {
 		m = keys(t, m, tc.typed...)
@@ -752,7 +752,7 @@ func TestBrowser(t *testing.T) {
 		" archype/", "tracked", " wipsync/", "behind",
 		// A tracked directory shows what the folder list would: its log.
 		"Projects/aha/archype", "in step with master", "b1b1b1b1",
-		"h up  l open    s snapshot  P push  p pull    space mark  / search  . hidden  tab folders",
+		"h up  l open    s snapshot  P push  p pull  o here  O window    space mark  / search  . hidden",
 	} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
@@ -766,7 +766,7 @@ func TestBrowser(t *testing.T) {
 	if m.br.dir != filepath.Join(home, "Projects") || m.path() != filepath.Join(home, "Projects/aha") {
 		t.Fatalf("after h: at %q on %q", m.br.dir, m.path())
 	}
-	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add    space mark  / search  . hidden"} {
+	for _, want := range []string{" aha/", " new-thing/", "not tracked: a to add it", "h up  l open    a add  o here  O window    space mark  / search  . hidden"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen lacks %q", want)
 		}
@@ -801,7 +801,7 @@ func TestBrowser(t *testing.T) {
 	if m.path() != filepath.Join(home, "todo.txt") {
 		t.Fatalf("G went to %q", m.path())
 	}
-	if got := bottom(m); got != "h up    / search  . hidden  tab folders    j/k move  R refresh  q quit" {
+	if got := bottom(m); got != "h up    o here  O window    / search  . hidden  tab folders    j/k move  R refresh  q quit" {
 		t.Errorf("bottom line on a file = %q", got)
 	}
 	if !strings.Contains(m.View(), "6 B, changed ") {
@@ -1245,5 +1245,45 @@ func TestSearchInBrowser(t *testing.T) {
 	m.browse(filepath.Join(home, "other/Projects/x"), "")
 	if m = keys(t, m, "/", "a"); !strings.Contains(bottom(m), "no match") {
 		t.Errorf("bottom line = %q", bottom(m))
+	}
+}
+
+// O runs the window command on the selected directory, beside the interface.
+func TestOpenWindow(t *testing.T) {
+	m, _ := started(t, 140, 14)
+	got := filepath.Join(t.TempDir(), "got")
+	m.open = config.Open{Window: "echo >" + got, Here: "true"}
+	dir := t.TempDir()
+	m.byDir = nil
+	m = goTo(t, m, "Projects/aha/wipsync")
+	m.selected().folder.Dir = dir
+	if !strings.Contains(bottom(m), "o here  O window") {
+		t.Errorf("o and O are not offered:\n%s", bottom(m))
+	}
+	next, cmd := m.Update(keyMsg("O"))
+	if cmd == nil {
+		t.Fatal("O does nothing")
+	}
+	if msg := cmd(); msg != nil {
+		t.Fatalf("the window command failed: %v", msg)
+	}
+	if out, _ := os.ReadFile(got); strings.TrimSpace(string(out)) != dir {
+		t.Errorf("the window command was given %q, want %q", out, dir)
+	}
+	if !strings.Contains(bottom(next.(Model)), "opened") {
+		t.Errorf("opening is not told:\n%s", bottom(next.(Model)))
+	}
+
+	// A command that fails says why.
+	m.open.Window = "echo nope >&2; exit 3"
+	m = run(t, m, "O")
+	if !strings.Contains(asks(m), "nope") {
+		t.Errorf("the failure is not shown:\n%s", m.View())
+	}
+
+	// A folder not on this client has nothing to open.
+	m = goTo(t, keys(t, m, "q"), "Projects/aha/website")
+	if strings.Contains(bottom(m), "o here") {
+		t.Errorf("o is offered for a folder not here:\n%s", bottom(m))
 	}
 }

@@ -71,8 +71,9 @@ Compared per file against the common base snapshot:
 on a root, everything under it), `r` restore. Pull and restore ask first. Space marks lines, and
   the keys then act on everything marked. `/` searches the left pane as it is typed. `Tab` turns the left pane
   into a directory browser, where roots, tracked folders, other directories and files each have
-  their colour, and `a` adds the selected directory. Colours come from `theme.toml` beside the
-  config.
+  their colour, and `a` adds the selected directory. `o` opens the directory in the TUI's
+  terminal until it exits (`yazi`), `O` in a window of its own (`xdg-open`); both commands are set in the
+  config's `[open]` as `window` and `here`. Colours come from `theme.toml` beside the config.
 - **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
   and where the repository password comes from: `password_file` or `password_command`, handed to
   restic as is.

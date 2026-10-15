@@ -24,6 +24,9 @@ type Config struct {
 	PasswordFile    string `toml:"password_file,omitempty"`
 	PasswordCommand string `toml:"password_command,omitempty"`
 
+	// Open is what the TUI opens a directory with.
+	Open Open `toml:"open,omitempty"`
+
 	// Roots maps a root name to its location on this client. It is the only
 	// part of the config that differs between clients.
 	Roots   map[string]string `toml:"roots"`
@@ -39,6 +42,19 @@ type Folder struct {
 }
 
 func (f Folder) String() string { return f.Root + "/" + f.Path }
+
+// Open holds the commands the TUI opens a directory with. Each is run by sh,
+// in the directory and with it as the last argument.
+type Open struct {
+	Window string `toml:"window,omitempty"` // O: on its own, beside the TUI
+	Here   string `toml:"here,omitempty"`   // o: in the TUI's terminal, until it exits
+}
+
+// The commands used when the config names none.
+const (
+	DefaultOpenWindow = "xdg-open"
+	DefaultOpenHere   = "yazi"
+)
 
 // DefaultPath returns ~/.config/wipsync/config.toml.
 func DefaultPath() (string, error) {

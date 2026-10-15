@@ -62,6 +62,7 @@ type Model struct {
 	repository string
 	back       backend
 	theme      Theme
+	open       config.Open // what o and O run
 
 	world   app.World
 	loaded  bool
@@ -93,11 +94,19 @@ type Model struct {
 
 // New returns the interface for a client.
 func New(a *app.App, theme Theme) Model {
+	open := a.Config.Open
+	if open.Window == "" {
+		open.Window = config.DefaultOpenWindow
+	}
+	if open.Here == "" {
+		open.Here = config.DefaultOpenHere
+	}
 	return Model{
 		client:     a.Config.Client,
 		repository: a.Config.Repository,
 		back:       a,
 		theme:      theme,
+		open:       open,
 		loading:    true,
 	}
 }
@@ -138,6 +147,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = true
 		return m, m.load()
+
+	case openedMsg:
+		if msg.err != nil {
+			command := m.open.Window
+			if msg.here {
+				command = m.open.Here
+			}
+			m.dialog = message("Could not open", command+": "+msg.err.Error())
+		}
+		if msg.here && !m.loading && m.busy == "" {
+			m.loading = true
+			return m, m.load()
+		}
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
