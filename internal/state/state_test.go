@@ -1,6 +1,8 @@
 package state
 
 import (
+	"errors"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -71,4 +73,39 @@ func TestDefault(t *testing.T) {
 	if s, err := Default(); err != nil || s.Dir != "/home/u/.local/state/wipsync" {
 		t.Errorf("got %+v, %v", s, err)
 	}
+}
+
+func TestLock(t *testing.T) {
+	s := &Store{Dir: filepath.Join(t.TempDir(), "wipsync")}
+	unlock, err := s.Lock("Projects", "Freelance/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Lock("Projects", "Freelance/app"); !errors.Is(err, ErrBusy) {
+		t.Errorf("a second lock = %v, want ErrBusy", err)
+	}
+	other, err := s.Lock("Projects", "Freelance/other")
+	if err != nil {
+		t.Errorf("another folder is locked too: %v", err)
+	} else {
+		other()
+	}
+
+	// Another process sees it held, and free once let go.
+	file := s.file("Projects", "Freelance/app", "lock")
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("no flock command")
+	}
+	if err := exec.Command("flock", "-n", file, "true").Run(); err == nil {
+		t.Error("another process could take the lock")
+	}
+	unlock()
+	if err := exec.Command("flock", "-n", file, "true").Run(); err != nil {
+		t.Errorf("the lock is still held after unlock: %v", err)
+	}
+	again, err := s.Lock("Projects", "Freelance/app")
+	if err != nil {
+		t.Fatalf("lock after unlock: %v", err)
+	}
+	again()
 }

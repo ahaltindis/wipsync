@@ -1,0 +1,16 @@
+# Snapshots the folders on this client whenever they change.
+#   systemctl --user enable --now wipsync
+#   journalctl --user -u wipsync -f
+[Unit]
+Description=wipsync: snapshot work-in-progress folders
+
+[Service]
+ExecStart=/usr/bin/wipsync watch
+# Only wipsync is told to stop; it interrupts restic and lets it clean up.
+KillMode=mixed
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

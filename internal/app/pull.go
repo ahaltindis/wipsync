@@ -104,8 +104,13 @@ type PullResult struct {
 // folder's state is saved as a snapshot first.
 func (a *App) Pull(ctx context.Context, f config.Folder, from string) (PullResult, error) {
 	res := PullResult{Dir: a.Config.Dir(f)}
+	unlock, err := a.lock(f)
+	if err != nil {
+		return res, err
+	}
+	defer unlock()
 	// Saved first, so that whatever the pull does can be undone.
-	saved, err := a.Snapshot(ctx, f)
+	saved, err := a.snapshot(ctx, f)
 	if err != nil {
 		return res, err
 	}
@@ -179,6 +184,11 @@ func (a *App) CheckNewRoot(root, dir string) error {
 func (a *App) Fetch(ctx context.Context, f config.Folder, rootDir string, t Target) (PullResult, error) {
 	dir := filepath.Join(rootDir, filepath.FromSlash(f.Path))
 	res := PullResult{Outcome: Pulled, Target: t.Snapshot, Dir: dir}
+	unlock, err := a.lock(f)
+	if err != nil {
+		return res, err
+	}
+	defer unlock()
 	client, err := a.Client()
 	if err != nil {
 		return res, err

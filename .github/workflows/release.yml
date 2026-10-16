@@ -32,7 +32,7 @@ jobs:
           "$name/wipsync" completion bash > "$name/completions/wipsync.bash"
           "$name/wipsync" completion zsh > "$name/completions/_wipsync"
           "$name/wipsync" completion fish > "$name/completions/wipsync.fish"
-          cp LICENSE README.md "$name/"
+          cp LICENSE README.md systemd/wipsync.service "$name/"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           gh release create "$GITHUB_REF_NAME" "$name.tar.gz" "$name.tar.gz.sha256" --title "$GITHUB_REF_NAME" --generate-notes

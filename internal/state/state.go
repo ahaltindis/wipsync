@@ -8,7 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
+
+// ErrBusy says another process holds a folder's lock.
+var ErrBusy = errors.New("another wipsync is working on it")
 
 type Store struct {
 	Dir string
@@ -101,4 +105,27 @@ func (s *Store) SetAfterPull(root, path string, pulled bool) error {
 		return nil
 	}
 	return err
+}
+
+// Lock takes the folder's lock without waiting, or returns ErrBusy if
+// another process has it. It is held until unlock is called, or until the
+// process ends, however it ends: the kernel lets it go with the file.
+// Locking twice in one process also returns ErrBusy.
+func (s *Store) Lock(root, path string) (unlock func(), err error) {
+	file := s.file(root, path, "lock")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return nil, err
+	}
+	fd, err := os.OpenFile(file, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		fd.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrBusy
+		}
+		return nil, err
+	}
+	return func() { fd.Close() }, nil
 }

@@ -11,6 +11,16 @@ wipsync init      # once per machine: the repository password and location
 wipsync doctor    # check the setup
 ```
 
+To snapshot folders automatically as they change:
+
+```sh
+systemctl --user enable --now wipsync
+journalctl --user -u wipsync -f   # what it does
+```
+
+The service runs without a terminal, so ssh must reach the server without asking anything: a key
+without a passphrase, or an agent the user session already has.
+
 The server needs nothing installed beyond ssh, `sh` and `flock`.
 
 ## Development

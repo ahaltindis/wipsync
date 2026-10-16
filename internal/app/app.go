@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -67,6 +68,16 @@ func CheckPassword(cfg *config.Config) error {
 }
 
 // Client returns the restic client for the configured repository.
+// lock takes the folder's lock for one operation, so that no two wipsync
+// processes work on the folder at once. It does not wait.
+func (a *App) lock(f config.Folder) (unlock func(), err error) {
+	unlock, err = a.State.Lock(f.Root, f.Path)
+	if err != nil {
+		return nil, fmt.Errorf("%s is busy: %w", f, err)
+	}
+	return unlock, nil
+}
+
 func (a *App) Client() (*restic.Client, error) {
 	for _, check := range []func(*config.Config) error{CheckRepository, CheckPassword} {
 		if err := check(a.Config); err != nil {
@@ -87,6 +98,27 @@ func (a *App) Pointers() (master.Pointers, error) {
 		return master.OpenNoTerminal(a.Config.Repository)
 	}
 	return master.Open(a.Config.Repository)
+}
+
+// Reach reports whether the repository's server answers, without restic and
+// without the password: for one reached over ssh, a single ssh call.
+func (a *App) Reach(ctx context.Context) error {
+	pointers, err := a.Pointers()
+	if err != nil {
+		return err
+	}
+	return pointers.Check(ctx)
+}
+
+// Here returns the folders whose directory is on this client.
+func (a *App) Here() []config.Folder {
+	var here []config.Folder
+	for _, f := range a.Config.Folders {
+		if info, err := os.Stat(a.Config.Dir(f)); err == nil && info.IsDir() {
+			here = append(here, f)
+		}
+	}
+	return here
 }
 
 // remote returns what an operation on the repository needs: the restic

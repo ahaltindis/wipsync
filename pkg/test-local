@@ -21,7 +21,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 "$build/$name/wipsync" completion bash >"$build/$name/completions/wipsync.bash"
 "$build/$name/wipsync" completion zsh >"$build/$name/completions/_wipsync"
 "$build/$name/wipsync" completion fish >"$build/$name/completions/wipsync.fish"
-cp LICENSE README.md "$build/$name/"
+cp LICENSE README.md systemd/wipsync.service "$build/$name/"
 tar -czf "$build/$name.tar.gz" -C "$build" "$name"
 rm -rf "${build:?}/$name"
 

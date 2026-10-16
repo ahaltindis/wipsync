@@ -19,6 +19,11 @@ type PushResult struct {
 // and uploads nothing. The server accepts it only if master is still where
 // this client last saw it.
 func (a *App) Push(ctx context.Context, f config.Folder) (PushResult, error) {
+	unlock, err := a.lock(f)
+	if err != nil {
+		return PushResult{}, err
+	}
+	defer unlock()
 	client, pointers, err := a.remote(ctx)
 	if err != nil {
 		return PushResult{}, err

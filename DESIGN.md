@@ -3,10 +3,11 @@
 Work on one machine, continue on another. Syncs whole folders, including uncommitted and untracked
 files and `.git`, through an always-on home server.
 
-Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log` and `doctor` work. Pull
-does not merge yet: when both sides changed it stops, and `restore` takes one side as it is. `diff`
-and the background service are not built yet. `wipsync tui` does the same from one screen, and
-adds folders from a directory browser.
+Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log`, `watch` and `doctor`
+work. Pull does not merge yet: when both sides changed it stops, and `restore` takes one side as it
+is. `diff` and notifications are not built yet. `wipsync tui` does the same from one screen, and
+adds folders from a directory browser. `wipsync watch`, run by a user service, snapshots folders
+as they change.
 
 ## Model
 
@@ -39,6 +40,11 @@ adds folders from a directory browser.
 - A snapshot is never changed after it is created. Its ID is its name.
 - No snapshot is made when nothing changed. wipsync decides that itself, from a fingerprint of the
   folder, before it calls the engine.
+- Only one wipsync works on a folder at a time: snapshot, push, pull and restore take a lock on the
+  folder in the client's state (`flock`, let go by the kernel however the process ends). They
+  refuse a busy folder at once; the service tries it again later. The lock is always taken before
+  restic's repository lock and the server's master lock, and nothing waits on it, so the three
+  cannot deadlock.
 
 ## Pull when both sides changed
 
@@ -62,9 +68,16 @@ Compared per file against the common base snapshot:
   atomic, the push check, the client runs a short shell script over ssh. The server needs only `sh`
   and `flock`, and neither restic nor the repository password. No daemon; a server-side command
   can be added later if needed. Only ssh and local-disk repositories are supported.
-- **Client**: a user service that watches the folders and snapshots after changes (debounced), plus a
-  CLI: `init`, `add`, `list`, `snapshot`, `log`, `diff`, `push`, `pull`, `restore`, and `doctor`
-  to check the setup. Written in Go with cobra.
+- **Client**: a user service that snapshots the folders after changes, plus a CLI: `init`, `add`,
+  `list`, `snapshot`, `log`, `diff`, `push`, `pull`, `restore`, `watch`, and `doctor` to check the
+  setup. Written in Go with cobra.
+- **Service**: `wipsync watch`, run by the user unit `wipsync.service`. It polls: every minute it
+  takes each folder's fingerprint (about 20 ms for a project folder), and snapshots a changed one
+  once it has been quiet for 30 seconds, or after 5 minutes if it keeps changing. inotify was left
+  out: it would only shorten that delay, at the cost of a watch per directory and rescans for what
+  it misses. Before sending anything it asks the server, with one ssh call and a 10 second connect
+  timeout; while the server does not answer it sends nothing and asks again after 5 minutes, then
+  10, 20, and every 30. It logs to the journal, each failure once. It never pulls or pushes.
 - **TUI**: `wipsync tui`, in the same binary, built with Bubble Tea. Folders under their roots on
   the left, coloured by what is due (snapshot, push, pull); the selected folder's snapshots on the
   right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest;

@@ -28,6 +28,11 @@ type RestoreResult struct {
 // the start of its ID, or is "master".
 func (a *App) Restore(ctx context.Context, f config.Folder, name string) (RestoreResult, error) {
 	var res RestoreResult
+	unlock, err := a.lock(f)
+	if err != nil {
+		return res, err
+	}
+	defer unlock()
 	client, pointers, err := a.remote(ctx)
 	if err != nil {
 		return res, err
@@ -45,7 +50,7 @@ func (a *App) Restore(ctx context.Context, f config.Folder, name string) (Restor
 		return res, err
 	}
 
-	saved, err := a.Snapshot(ctx, f)
+	saved, err := a.snapshot(ctx, f)
 	if err != nil {
 		return res, err
 	}

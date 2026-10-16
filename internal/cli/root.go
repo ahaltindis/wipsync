@@ -20,7 +20,7 @@ func Root() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().String("config", "", "config file (default ~/.config/wipsync/config.toml)")
-	root.AddCommand(initCmd(), addCmd(), listCmd(), snapshotCmd(), pushCmd(), pullCmd(), restoreCmd(), logCmd(), tuiCmd(), doctorCmd())
+	root.AddCommand(initCmd(), addCmd(), listCmd(), snapshotCmd(), pushCmd(), pullCmd(), restoreCmd(), logCmd(), tuiCmd(), watchCmd(), doctorCmd())
 	return root
 }
 

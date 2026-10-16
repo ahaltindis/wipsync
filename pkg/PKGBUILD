@@ -18,6 +18,7 @@ package() {
   cd "wipsync-$pkgver-x86_64"
   install -Dm755 wipsync "$pkgdir/usr/bin/wipsync"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 wipsync.service "$pkgdir/usr/lib/systemd/user/wipsync.service"
   install -Dm644 completions/wipsync.bash "$pkgdir/usr/share/bash-completion/completions/wipsync"
   install -Dm644 completions/_wipsync "$pkgdir/usr/share/zsh/site-functions/_wipsync"
   install -Dm644 completions/wipsync.fish "$pkgdir/usr/share/fish/vendor_completions.d/wipsync.fish"

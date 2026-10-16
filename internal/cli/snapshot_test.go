@@ -361,3 +361,30 @@ func TestLog(t *testing.T) {
 		t.Errorf("err = %v\n%s", err, out)
 	}
 }
+
+// While another wipsync works on a folder, the others refuse it at once.
+func TestBusyFolder(t *testing.T) {
+	e := newEnv(t)
+	e.repo()
+	e.write("Projects/app/a.txt", "one\n")
+	dir := filepath.Join(e.home, "Projects/app")
+	e.must("\n", "add", dir)
+	e.must("", "snapshot", dir)
+
+	store, _ := state.Default()
+	unlock, err := store.Lock("Projects", "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.write("Projects/app/a.txt", "two\n")
+	for _, args := range [][]string{{"snapshot", dir}, {"push", dir}, {"pull", dir}, {"restore", "master", dir}} {
+		out, err := e.run("", args...)
+		if err == nil || !strings.Contains(out+err.Error(), "Projects/app is busy: another wipsync is working on it") {
+			t.Errorf("%s while busy: %v\n%s", args[0], err, out)
+		}
+	}
+	unlock()
+	if out := e.must("", "snapshot", dir); !strings.Contains(out, "snapshot ") {
+		t.Errorf("snapshot after the lock was let go: %s", out)
+	}
+}

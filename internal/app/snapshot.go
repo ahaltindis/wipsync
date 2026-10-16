@@ -13,6 +13,16 @@ import (
 // its last snapshot; the result then has no snapshot ID. It keeps the
 // folder's base and fingerprint up to date.
 func (a *App) Snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error) {
+	unlock, err := a.lock(f)
+	if err != nil {
+		return restic.BackupResult{}, err
+	}
+	defer unlock()
+	return a.snapshot(ctx, f)
+}
+
+// snapshot is Snapshot for a caller that holds the folder's lock.
+func (a *App) snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error) {
 	base, err := a.State.Base(f.Root, f.Path)
 	if err != nil {
 		return restic.BackupResult{}, err
@@ -74,13 +84,17 @@ func (a *App) Snapshot(ctx context.Context, f config.Folder) (restic.BackupResul
 
 // Changed reports whether the folder differs from its last snapshot or pull.
 func (a *App) Changed(ctx context.Context, f config.Folder) (bool, error) {
+	_, changed, err := a.Look(ctx, f)
+	return changed, err
+}
+
+// Look takes the folder's fingerprint, and reports whether it differs from
+// the one at its last snapshot or pull.
+func (a *App) Look(ctx context.Context, f config.Folder) (print string, changed bool, err error) {
 	last, err := a.State.Fingerprint(f.Root, f.Path)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	if last == "" {
-		return true, nil
-	}
-	print, err := fingerprint.Of(ctx, a.Config.Dir(f), f.Ignore)
-	return print != last, err
+	print, err = fingerprint.Of(ctx, a.Config.Dir(f), f.Ignore)
+	return print, last == "" || print != last, err
 }

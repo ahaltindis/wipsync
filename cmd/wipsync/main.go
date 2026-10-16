@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/ahaltindis/wipsync/internal/cli"
 )
@@ -14,7 +15,8 @@ var version = "dev"
 
 func main() {
 	cli.Version = version
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM is how a service is stopped.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// The first Ctrl+C ends the command cleanly. After it, stop catching the
 	// signal, so a second one ends the program at once.

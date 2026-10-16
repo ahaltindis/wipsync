@@ -353,7 +353,7 @@ func TestNoTerminal(t *testing.T) {
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
 		t.Error("ssh is not started in its own session")
 	}
-	if want := []string{"ssh", "-o", "BatchMode=yes", "--", "user@host", "true"}; !slices.Equal(cmd.Args, want) {
+	if want := []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "user@host", "true"}; !slices.Equal(cmd.Args, want) {
 		t.Errorf("args = %v, want %v", cmd.Args, want)
 	}
 	if !p.(*pointers).run(ctx, "true").SysProcAttr.Setsid {

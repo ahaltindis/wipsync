@@ -102,7 +102,8 @@ var sshCommand = func(ctx context.Context, t target, commandLine string) *exec.C
 		args = append(args, "-p", t.port)
 	}
 	if t.noTerminal {
-		args = append(args, "-o", "BatchMode=yes")
+		// Nobody is there to answer, or to wait for a server that is away.
+		args = append(args, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 	}
 	args = append(args, "--", t.host, commandLine)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
