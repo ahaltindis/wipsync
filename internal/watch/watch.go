@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ahaltindis/wipsync/internal/app"
@@ -36,6 +37,8 @@ type Backend interface {
 	Look(ctx context.Context, f config.Folder) (print string, changed bool, err error)
 	Snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error)
 	Reach(ctx context.Context) error
+	Survey(ctx context.Context) (app.World, error)
+	ClientName() string
 }
 
 // Watcher runs the loop. Open is called again every Poll, so that folders
@@ -43,6 +46,9 @@ type Backend interface {
 type Watcher struct {
 	Open func() (Backend, error)
 	Log  *log.Logger
+	// Notify shows news on the desktop; when it is nil or fails, the news
+	// is only logged.
+	Notify func(ctx context.Context, title, body string, urgent bool) error
 
 	back     Backend
 	opened   time.Time
@@ -52,6 +58,12 @@ type Watcher struct {
 	retry    time.Duration // the wait before the next try, while offline
 	nextPing time.Time
 	lastPing time.Time
+
+	nextCheck time.Time
+	checkErr  string
+	told      map[string]time.Time // news told, by key, and when
+	known     map[string]bool      // folders not on this client, as of the last check
+	notifyErr string
 }
 
 // folder is what the watcher remembers of one folder.
@@ -95,6 +107,69 @@ func (w *Watcher) Round(ctx context.Context, now time.Time) {
 			continue
 		}
 		w.look(ctx, now, f, st)
+	}
+	if !now.Before(w.nextCheck) && ctx.Err() == nil {
+		w.check(ctx, now)
+	}
+}
+
+// check reads the repository and tells what is new.
+func (w *Watcher) check(ctx context.Context, now time.Time) {
+	if !w.online(ctx, now) {
+		w.nextCheck = w.nextPing
+		return
+	}
+	w.nextCheck = now.Add(Check)
+	world, err := w.back.Survey(ctx)
+	if err != nil {
+		if ctx.Err() == nil && err.Error() != w.checkErr {
+			w.Log.Printf("cannot read the repository: %v", err)
+			w.checkErr = err.Error()
+		}
+		return
+	}
+	w.checkErr = ""
+	if w.told == nil {
+		w.told = map[string]time.Time{}
+	}
+	var lines []string
+	urgent := false
+	for _, it := range news(world, w.back.ClientName(), w.known) {
+		at, done := w.told[it.key]
+		if done && (!strings.HasPrefix(it.key, "wip ") || now.Sub(at) < WIPAgain) {
+			continue
+		}
+		w.told[it.key] = now
+		lines = append(lines, it.line)
+		urgent = urgent || it.urgent
+	}
+	// The folders not here now are what a new one is told against next time.
+	w.known = map[string]bool{}
+	for _, f := range world.Folders {
+		if f.Dir == "" {
+			w.known[f.Folder.String()] = true
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	for _, l := range lines {
+		w.Log.Print(l)
+	}
+	title := "wipsync: 1 update"
+	if len(lines) > 1 {
+		title = fmt.Sprintf("wipsync: %d updates", len(lines))
+	}
+	if w.Notify == nil {
+		return
+	}
+	if err := w.Notify(ctx, title, strings.Join(lines, "\n"), urgent); err != nil {
+		if err.Error() != w.notifyErr {
+			w.Log.Printf("cannot notify: %v", err)
+			w.notifyErr = err.Error()
+		}
+	} else {
+		w.notifyErr = ""
 	}
 }
 

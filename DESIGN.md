@@ -5,7 +5,7 @@ files and `.git`, through an always-on home server.
 
 Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log`, `watch` and `doctor`
 work. Pull does not merge yet: when both sides changed it stops, and `restore` takes one side as it
-is. `diff` and notifications are not built yet. `wipsync tui` does the same from one screen, and
+is. `diff` is not built yet. `wipsync tui` does the same from one screen, and
 adds folders from a directory browser. `wipsync watch`, run by a user service, snapshots folders
 as they change.
 
@@ -78,6 +78,12 @@ Compared per file against the common base snapshot:
   it misses. Before sending anything it asks the server, with one ssh call and a 10 second connect
   timeout; while the server does not answer it sends nothing and asks again after 5 minutes, then
   10, 20, and every 30. It logs to the journal, each failure once. It never pulls or pushes.
+  Every 5 minutes it reads the repository as the TUI does, and tells on the desktop
+  (`notify-send`, one notification per check) what is new: master moved past this client's folder
+  (urgent when the folder changed too), newer work on another client, a folder added on another
+  client. What it told is kept only while it runs, so after a restart it tells again what is
+  still due; folders not on the client when it starts are not told as new. Newer work is told at
+  most once an hour per folder.
 - **TUI**: `wipsync tui`, in the same binary, built with Bubble Tea. Folders under their roots on
   the left, coloured by what is due (snapshot, push, pull); the selected folder's snapshots on the
   right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest;

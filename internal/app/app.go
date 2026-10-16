@@ -110,6 +110,9 @@ func (a *App) Reach(ctx context.Context) error {
 	return pointers.Check(ctx)
 }
 
+// ClientName is this client's name, as its snapshots are tagged.
+func (a *App) ClientName() string { return a.Config.Client }
+
 // Here returns the folders whose directory is on this client.
 func (a *App) Here() []config.Folder {
 	var here []config.Folder

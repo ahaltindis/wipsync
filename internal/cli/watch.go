@@ -23,8 +23,11 @@ Each folder is looked at every minute; one that changed is snapshotted once
 it has been quiet for 30 seconds, or after 5 minutes if it keeps changing.
 The server is asked first, and while it does not answer, nothing is sent
 and it is asked again after 5 minutes, then less often, up to every 30.
-It never pulls or pushes. Folders added to the config are picked up
-without a restart.
+Every 5 minutes it reads the repository, and tells on the desktop (through
+notify-send) and in its log what is new: master moved, newer work on
+another client, a folder added on another client. Each is told once while
+it runs; newer work at most once an hour. It never pulls or pushes.
+Folders added to the config are picked up without a restart.
 
 This is what the wipsync user service runs:
 
@@ -53,7 +56,8 @@ This is what the wipsync user service runs:
 					a.NoTerminal = true
 					return a, nil
 				},
-				Log: log.New(cmd.ErrOrStderr(), "", flags),
+				Log:    log.New(cmd.ErrOrStderr(), "", flags),
+				Notify: watch.Desktop,
 			}
 			return w.Run(cmd.Context())
 		},
