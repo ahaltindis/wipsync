@@ -21,7 +21,7 @@ func TestDo(t *testing.T) {
 		Failed: []string{"Projects/web: push rejected"}}
 	c.back.calls, c.back.surveys = nil, 0
 
-	c.w.Do(context.Background(), c.now, PushAll)
+	c.w.Do(context.Background(), c.now, PushAll, app.Scope{})
 	if strings.Join(c.back.calls, " ") != "push all" {
 		t.Errorf("calls = %v", c.back.calls)
 	}
@@ -54,7 +54,7 @@ func TestDoWithoutFailures(t *testing.T) {
 	c, sent := newsClock(t)
 	c.at(0)
 	c.back.all = app.AllResult{Verb: "pull"}
-	c.w.Do(context.Background(), c.now, PullAll)
+	c.w.Do(context.Background(), c.now, PullAll, app.Scope{})
 	if want := (told{"wipsync: pull all", "nothing to pull", false}); len(*sent) != 1 || (*sent)[0] != want {
 		t.Errorf("told %+v, want %+v", *sent, want)
 	}
@@ -64,7 +64,7 @@ func TestDoFails(t *testing.T) {
 	c, sent := newsClock(t)
 	c.at(0)
 	c.back.allErr = errors.New("cannot read the masters: connection refused")
-	c.w.Do(context.Background(), c.now, PullAll)
+	c.w.Do(context.Background(), c.now, PullAll, app.Scope{})
 	if !strings.Contains(c.log(), "cannot pull all: cannot read the masters: connection refused") {
 		t.Error("the failure is not logged")
 	}
@@ -82,11 +82,12 @@ func TestRunTakesAsks(t *testing.T) {
 	c.back.during = cancel
 	c.back.all = app.AllResult{Verb: "pull", Done: 1}
 	reply := make(chan Reply, 1)
-	asks <- Request{PullAll, reply}
+	asks <- Request{PullAll, app.Scope{Root: "Projects"}, reply}
 	if err := c.w.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(c.back.calls, " "), "pull all") {
+	// The scope reaches the client.
+	if !strings.Contains(strings.Join(c.back.calls, " "), "pull all of some") {
 		t.Errorf("calls = %v", c.back.calls)
 	}
 	if r := <-reply; r.Err != nil || r.Result.Done != 1 {

@@ -14,13 +14,14 @@ import (
 	"github.com/ahaltindis/wipsync/internal/app"
 )
 
-// The service answers on a Unix socket, so that `wipsync pull --all` and
-// `push --all` run in it, as the tray's menu does: the icon shows them, and
-// the desktop is told how they went. A request is one JSON line, and so is
-// the answer, sent once the action is done.
+// The service answers on a Unix socket, so that pulls and pushes of many
+// folders from the CLI and the TUI run in it, as the tray's menu does: the
+// icon shows them, and the desktop is told how they went. A request is one
+// JSON line, and so is the answer, sent once the action is done.
 
 type socketRequest struct {
-	Action string `json:"action"`
+	Action string    `json:"action"`
+	Scope  app.Scope `json:"scope"`
 }
 
 type socketReply struct {
@@ -89,7 +90,7 @@ func answer(ctx context.Context, c net.Conn, asks chan<- Request) {
 	// Buffered: the watcher does not wait for a client that went away.
 	reply := make(chan Reply, 1)
 	select {
-	case asks <- Request{a, reply}:
+	case asks <- Request{a, req.Scope, reply}:
 	case <-ctx.Done():
 		return
 	}
@@ -107,9 +108,10 @@ func answer(ctx context.Context, c net.Conn, asks chan<- Request) {
 // ErrNoService is returned by Ask when no service answers on the socket.
 var ErrNoService = errors.New("no wipsync watch answers")
 
-// Ask has the service at path run an action, and returns how it went. It
-// returns ErrNoService when none answers; the action was not run then.
-func Ask(ctx context.Context, path string, a Action) (app.AllResult, error) {
+// Ask has the service at path run an action on the folders in scope, and
+// returns how it went. It returns ErrNoService when none answers; the
+// action was not run then.
+func Ask(ctx context.Context, path string, a Action, scope app.Scope) (app.AllResult, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "unix", path)
 	if err != nil {
@@ -120,7 +122,7 @@ func Ask(ctx context.Context, path string, a Action) (app.AllResult, error) {
 		<-ctx.Done()
 		c.Close()
 	}()
-	if err := json.NewEncoder(c).Encode(socketRequest{a.String()}); err != nil {
+	if err := json.NewEncoder(c).Encode(socketRequest{a.String(), scope}); err != nil {
 		return app.AllResult{}, fmt.Errorf("asking the wipsync service: %w", err)
 	}
 	var r socketReply

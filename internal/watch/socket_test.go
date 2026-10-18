@@ -13,7 +13,7 @@ import (
 )
 
 // serve runs Serve at a new socket, answering each request with reply.
-func serve(t *testing.T, reply func(Action) Reply) (string, chan<- Request) {
+func serve(t *testing.T, reply func(Request) Reply) (string, chan<- Request) {
 	t.Helper()
 	// Short: a socket's path is limited to about 100 bytes.
 	dir, err := os.MkdirTemp("", "ws")
@@ -28,7 +28,7 @@ func serve(t *testing.T, reply func(Action) Reply) (string, chan<- Request) {
 	go func() { done <- Serve(ctx, path, asks) }()
 	go func() {
 		for r := range asks {
-			r.Reply <- reply(r.Action)
+			r.Reply <- reply(r)
 		}
 	}()
 	t.Cleanup(func() {
@@ -53,42 +53,47 @@ func waitFor(t *testing.T, path string) {
 }
 
 func TestAsk(t *testing.T) {
-	path, _ := serve(t, func(a Action) Reply {
-		if a == PushAll {
-			return Reply{Result: app.AllResult{Verb: "push", Done: 1, Lines: []string{"Projects/app: master is now 55555555"}}}
+	path, _ := serve(t, func(r Request) Reply {
+		if r.Action == PushAll {
+			return Reply{Result: app.AllResult{Verb: "push", Root: r.Scope.Root, Done: 1, Lines: []string{"Projects/app: master is now 55555555"}}}
 		}
 		return Reply{Err: errors.New("cannot read the masters: connection refused")}
 	})
-	res, err := Ask(context.Background(), path, PushAll)
+	res, err := Ask(context.Background(), path, PushAll, app.Scope{})
 	if err != nil || res.Summary() != "pushed 1 folder" || len(res.Lines) != 1 {
 		t.Errorf("push all: %+v, %v", res, err)
 	}
-	if _, err := Ask(context.Background(), path, PullAll); err == nil || err.Error() != "cannot read the masters: connection refused" {
+	// The scope goes with the request.
+	res, err = Ask(context.Background(), path, PushAll, app.Scope{Root: "Projects"})
+	if err != nil || res.Summary() != "pushed 1 folder under Projects" {
+		t.Errorf("push all of a root: %+v, %v", res, err)
+	}
+	if _, err := Ask(context.Background(), path, PullAll, app.Scope{}); err == nil || err.Error() != "cannot read the masters: connection refused" {
 		t.Errorf("pull all: err = %v", err)
 	}
 }
 
 func TestAskWithoutService(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "none.sock")
-	if _, err := Ask(context.Background(), path, PullAll); !errors.Is(err, ErrNoService) {
+	if _, err := Ask(context.Background(), path, PullAll, app.Scope{}); !errors.Is(err, ErrNoService) {
 		t.Errorf("err = %v", err)
 	}
 	// A file left by a service that is gone is no service either.
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Ask(context.Background(), path, PullAll); !errors.Is(err, ErrNoService) {
+	if _, err := Ask(context.Background(), path, PullAll, app.Scope{}); !errors.Is(err, ErrNoService) {
 		t.Errorf("with a stale file: err = %v", err)
 	}
 }
 
 // One service answers at a time; a second is told so, and the first goes on.
 func TestServeOnce(t *testing.T) {
-	path, _ := serve(t, func(Action) Reply { return Reply{Result: app.AllResult{Verb: "pull"}} })
+	path, _ := serve(t, func(Request) Reply { return Reply{Result: app.AllResult{Verb: "pull"}} })
 	if err := Serve(context.Background(), path, nil); err == nil || !strings.Contains(err.Error(), "another wipsync watch answers") {
 		t.Errorf("second Serve: %v", err)
 	}
-	if res, err := Ask(context.Background(), path, PullAll); err != nil || res.Summary() != "nothing to pull" {
+	if res, err := Ask(context.Background(), path, PullAll, app.Scope{}); err != nil || res.Summary() != "nothing to pull" {
 		t.Errorf("after the second: %+v, %v", res, err)
 	}
 }
@@ -118,7 +123,7 @@ func TestServeReplacesStale(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if res, err := Ask(context.Background(), path, PushAll); err != nil || res.Summary() != "nothing to push" {
+	if res, err := Ask(context.Background(), path, PushAll, app.Scope{}); err != nil || res.Summary() != "nothing to push" {
 		t.Errorf("%+v, %v", res, err)
 	}
 	cancel()

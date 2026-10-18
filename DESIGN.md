@@ -78,7 +78,7 @@ Compared per file against the common base snapshot:
   it misses. Before sending anything it asks the server, with one ssh call and a 10 second connect
   timeout; while the server does not answer it sends nothing and asks again after 5 minutes, then
   10, 20, and every 30. It logs to the journal, each failure once. It pulls or pushes only when
-  asked: from the tray's menu, or by `pull --all` and `push --all` on its socket.
+  asked: from the tray's menu, or on its socket by the CLI and the TUI.
   Every 5 minutes it reads the repository as the TUI does, and tells on the desktop
   (`notify-send`, one notification per check) what is new: master moved past this client's folder
   (urgent when the folder changed too), newer work on another client, a folder added on another
@@ -144,14 +144,15 @@ Compared per file against the common base snapshot:
   changed here, or whose root has none, is left alone with a line on why. Push all makes the
   latest snapshot master for folders that have one master does not; a folder changed since that
   snapshot fails, as does one whose master another client moved, and a later push all takes it.
-  The CLI exits non-zero when a folder failed. While `wipsync watch` runs, `pull --all` and
-  `push --all` hand the work to it over a Unix socket, so that its icon shows it and the desktop
-  is told, as with the tray's menu; the CLI prints the lines the service sends back. The socket
+  The CLI exits non-zero when a folder failed. While `wipsync watch` runs, the CLI's `--all` and
+  the TUI's pull and push of a root or of marked folders hand the work to it over a Unix socket,
+  scope included, so that its icon shows it and the desktop is told, as with the tray's menu;
+  they show the result the service sends back. The socket
   is `$XDG_RUNTIME_DIR/wipsync/watch-<hash>.sock`, named after the database, so a client with
   another database never reaches the service. A request is one JSON line, and so is the answer,
   sent when the action is done; requests wait in the same queue as the menu's. When nothing
-  answers, the CLI does the work itself; when the service stops before it answers, the CLI says
-  so and does not run it again.
+  answers, the CLI or the TUI does the work itself; when the service stops before it answers,
+  they say so and do not run it again.
 - **Log**: what was sent and when, per folder.
 - **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, `__pycache__`).
 - **Menu**: Archype opens a vicinae dmenu on `SUPER + W` with the TUI, pull all and push all,

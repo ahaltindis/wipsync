@@ -48,8 +48,8 @@ type Backend interface {
 type Action int
 
 const (
-	PullAll Action = iota // app.PullAll, for every folder
-	PushAll               // app.PushAll, for every folder
+	PullAll Action = iota // app.PullAll
+	PushAll               // app.PushAll
 )
 
 var actionNames = [...]string{"pull all", "push all"}
@@ -66,10 +66,11 @@ func ParseAction(s string) (Action, bool) {
 	return 0, false
 }
 
-// Request asks the watcher for an action. Reply, if not nil, is given how
-// it went.
+// Request asks the watcher for an action on the folders in Scope; an
+// empty one is every folder. Reply, if not nil, is given how it went.
 type Request struct {
 	Action Action
+	Scope  app.Scope
 	Reply  chan<- Reply
 }
 
@@ -135,7 +136,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		case r := <-w.Asks:
-			res, err := w.Do(ctx, time.Now(), r.Action)
+			res, err := w.Do(ctx, time.Now(), r.Action, r.Scope)
 			if r.Reply != nil {
 				r.Reply <- Reply{res, err}
 			}
@@ -238,7 +239,7 @@ func (w *Watcher) notify(ctx context.Context, now time.Time, title, body string,
 
 // Do runs an action, logs how it went for each folder, and tells the
 // outcome on the desktop. The repository is read again right after.
-func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) (app.AllResult, error) {
+func (w *Watcher) Do(ctx context.Context, now time.Time, a Action, scope app.Scope) (app.AllResult, error) {
 	defer w.show()
 	w.reopen(now)
 	if w.back == nil {
@@ -253,9 +254,9 @@ func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) (app.AllResul
 	var err error
 	switch a {
 	case PullAll:
-		res, err = w.back.PullAll(ctx, app.Scope{})
+		res, err = w.back.PullAll(ctx, scope)
 	case PushAll:
-		res, err = w.back.PushAll(ctx, app.Scope{})
+		res, err = w.back.PushAll(ctx, scope)
 	}
 	w.isActing = false
 	w.nextCheck = time.Time{}

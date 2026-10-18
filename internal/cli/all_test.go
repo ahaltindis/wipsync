@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
@@ -90,10 +92,10 @@ func TestAllThroughService(t *testing.T) {
 	asks := make(chan watch.Request)
 	done := make(chan error, 1)
 	go func() { done <- watch.Serve(ctx, sock, asks) }()
-	var asked []watch.Action
+	var asked []watch.Request
 	go func() {
 		for r := range asks {
-			asked = append(asked, r.Action)
+			asked = append(asked, r)
 			r.Reply <- watch.Reply{Result: app.AllResult{Verb: "push", Done: 1, Lines: []string{"Projects/app: from the service"}}}
 		}
 	}()
@@ -106,12 +108,22 @@ func TestAllThroughService(t *testing.T) {
 	if out := a.must("", "push", "--all"); out != "Projects/app: from the service\npushed 1 folder\n" {
 		t.Errorf("through the service:\n%s", out)
 	}
+	// What the TUI asks for: the marked folders, and where a new root goes.
+	cl, err := app.Open(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := app.Scope{Folders: []db.Folder{{Root: "Projects", Path: "app"}, {Root: "Work", Path: "x"}}, NewRoot: "Work", NewRootDir: "/home/u/Work"}
+	if _, err := (service{cl}).PullAll(context.Background(), scope); err != nil {
+		t.Fatal(err)
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if len(asked) != 1 || asked[0] != watch.PushAll {
-		t.Errorf("asked %v", asked)
+	if len(asked) != 2 || asked[0].Action != watch.PushAll || !reflect.DeepEqual(asked[0].Scope, app.Scope{}) ||
+		asked[1].Action != watch.PullAll || !reflect.DeepEqual(asked[1].Scope, scope) {
+		t.Errorf("asked %+v", asked)
 	}
 	// The service is gone: the CLI pushes itself.
 	if out := a.must("", "push", "--all"); !strings.Contains(out, "Projects/app: master is now ") {

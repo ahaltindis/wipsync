@@ -48,7 +48,7 @@ Colours come from theme.toml beside the config file. Start one with:
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 				return errNoTerminal
 			}
-			_, err = tea.NewProgram(tui.New(a, theme), tea.WithAltScreen(), tea.WithContext(cmd.Context())).Run()
+			_, err = tea.NewProgram(tui.New(a, service{a}, theme), tea.WithAltScreen(), tea.WithContext(cmd.Context())).Run()
 			return err
 		},
 	}

@@ -226,7 +226,7 @@ func absolute(path string) (string, error) {
 }
 
 // pull brings the target into a folder that is here, and says how it went.
-func pull(ctx context.Context, back backend, f db.Folder, from string) (string, error) {
+func pull(ctx context.Context, back Backend, f db.Folder, from string) (string, error) {
 	res, err := back.Pull(ctx, f, from)
 	if err != nil {
 		return "", err
@@ -235,7 +235,7 @@ func pull(ctx context.Context, back backend, f db.Folder, from string) (string, 
 }
 
 // fetch brings a folder that is not here into its root's directory.
-func fetch(ctx context.Context, back backend, f db.Folder, rootDir, from string) (string, error) {
+func fetch(ctx context.Context, back Backend, f db.Folder, rootDir, from string) (string, error) {
 	target, err := back.FindTarget(ctx, f, from)
 	if err != nil {
 		return "", err

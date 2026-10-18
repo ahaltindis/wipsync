@@ -11,7 +11,6 @@ import (
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/db"
-	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
 func pullCmd() *cobra.Command {
@@ -48,9 +47,8 @@ its tray icon shows it and the desktop is told how it went.`,
 				return err
 			}
 			if all {
-				return runAll(cmd, a, watch.PullAll, func() (app.AllResult, error) {
-					return a.PullAll(cmd.Context(), app.Scope{})
-				})
+				res, err := service{a}.PullAll(cmd.Context(), app.Scope{})
+				return printAll(cmd, res, err)
 			}
 			arg := ""
 			if len(args) == 1 {

@@ -14,9 +14,9 @@ import (
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
-// backend is what the interface asks of the client. *app.App is the real
+// Backend is what the interface asks of the client. *app.App is the real
 // one; the tests have their own.
-type backend interface {
+type Backend interface {
 	Survey(ctx context.Context) (app.World, error)
 	Snapshot(ctx context.Context, f db.Folder) (restic.BackupResult, error)
 	Push(ctx context.Context, f db.Folder) (app.PushResult, error)
@@ -63,7 +63,7 @@ type row struct {
 type Model struct {
 	client     string
 	repository string
-	back       backend
+	back       Backend
 	theme      Theme
 	open       config.Open // what o and O run
 
@@ -95,8 +95,9 @@ type Model struct {
 	width, height int
 }
 
-// New returns the interface for a client.
-func New(a *app.App, theme Theme) Model {
+// New returns the interface for a client, which acts through back: a,
+// or one that runs some of its actions elsewhere.
+func New(a *app.App, back Backend, theme Theme) Model {
 	open := a.Config.Open
 	if open.Window == "" {
 		open.Window = config.DefaultOpenWindow
@@ -107,7 +108,7 @@ func New(a *app.App, theme Theme) Model {
 	return Model{
 		client:     a.Data.Client,
 		repository: a.Data.Repository,
-		back:       a,
+		back:       back,
 		theme:      theme,
 		open:       open,
 		loading:    true,

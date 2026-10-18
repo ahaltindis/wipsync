@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
 func pushCmd() *cobra.Command {
@@ -39,9 +37,8 @@ tray icon shows it and the desktop is told how it went.`,
 				return err
 			}
 			if all {
-				return runAll(cmd, a, watch.PushAll, func() (app.AllResult, error) {
-					return a.PushAll(cmd.Context(), app.Scope{})
-				})
+				res, err := service{a}.PushAll(cmd.Context(), app.Scope{})
+				return printAll(cmd, res, err)
 			}
 			f, err := folderArg(a, args, 0)
 			if err != nil {
@@ -59,19 +56,9 @@ tray icon shows it and the desktop is told how it went.`,
 	return cmd
 }
 
-// runAll runs a pull or push of all folders in the service, when it runs
-// for this client: the tray's icon shows it, and the desktop is told how it
-// went. Without it, run does it here. Either way it prints a line per
-// folder and then the summary, and fails if any folder did.
-func runAll(cmd *cobra.Command, a *app.App, action watch.Action, run func() (app.AllResult, error)) error {
-	var res app.AllResult
-	err := watch.ErrNoService
-	if sock, ok := watch.SocketPath(a.DB.Path); ok {
-		res, err = watch.Ask(cmd.Context(), sock, action)
-	}
-	if errors.Is(err, watch.ErrNoService) {
-		res, err = run()
-	}
+// printAll prints how a pull or push of many folders went, a line per
+// folder and then the summary. It fails if any folder did.
+func printAll(cmd *cobra.Command, res app.AllResult, err error) error {
 	if err != nil {
 		return err
 	}
