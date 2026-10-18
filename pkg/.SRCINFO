@@ -3,6 +3,7 @@ pkgbase = wipsync-bin
 	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/ahaltindis/wipsync
+	install = wipsync.install
 	arch = x86_64
 	license = MIT
 	depends = restic>=0.17.1

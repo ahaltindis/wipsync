@@ -70,10 +70,10 @@ git push --quiet origin main
 
 echo "==> Updating the AUR package"
 git clone --quiet "$aur_url" "$work/aur"
-cp pkg/PKGBUILD pkg/.SRCINFO "$work/aur/"
+cp pkg/PKGBUILD pkg/.SRCINFO pkg/wipsync.install "$work/aur/"
 cd "$work/aur"
 makepkg --verifysource >/dev/null
-git add PKGBUILD .SRCINFO
+git add PKGBUILD .SRCINFO wipsync.install
 git commit --quiet -m "Update to $version"
 # The AUR only takes master, whatever the local default branch is called;
 # this matters for the very first push, when the clone is empty.

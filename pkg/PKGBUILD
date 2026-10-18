@@ -12,6 +12,7 @@ optdepends=('git: tell a refreshed git index from a real change'
 provides=(wipsync)
 conflicts=(wipsync)
 options=(!debug)
+install=wipsync.install
 source=("wipsync-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/wipsync-$pkgver-x86_64.tar.gz")
 sha256sums=('d08a5238ac9f4436640d64aca76429eeaea4f45846ccecab13c2b25733d50d27')
 

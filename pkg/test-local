@@ -26,6 +26,7 @@ tar -czf "$build/$name.tar.gz" -C "$build" "$name"
 rm -rf "${build:?}/$name"
 
 sed -e "s|^source=.*|source=(\"$name.tar.gz\")|" -e "s|^sha256sums=.*|sha256sums=(SKIP)|" pkg/PKGBUILD >"$build/PKGBUILD"
+cp pkg/wipsync.install "$build/"
 
 cd "$build"
 makepkg -si --noconfirm "$@"
