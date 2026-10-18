@@ -14,7 +14,7 @@ conflicts=(wipsync)
 options=(!debug)
 install=wipsync.install
 source=("wipsync-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/wipsync-$pkgver-x86_64.tar.gz")
-sha256sums=('d08a5238ac9f4436640d64aca76429eeaea4f45846ccecab13c2b25733d50d27')
+sha256sums=('d6cf2f96a329510b5f308e60972dc4651edbee240ca3a2403d60dbda43ccceac')
 
 package() {
   cd "wipsync-$pkgver-x86_64"
