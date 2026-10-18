@@ -76,15 +76,20 @@ func TestDoFails(t *testing.T) {
 // Run takes what is asked between its rounds.
 func TestRunTakesAsks(t *testing.T) {
 	c := newClock(t)
-	asks := make(chan Action, 1)
+	asks := make(chan Request, 1)
 	c.w.Asks = asks
 	ctx, cancel := context.WithCancel(context.Background())
 	c.back.during = cancel
-	asks <- PullAll
+	c.back.all = app.AllResult{Verb: "pull", Done: 1}
+	reply := make(chan Reply, 1)
+	asks <- Request{PullAll, reply}
 	if err := c.w.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(strings.Join(c.back.calls, " "), "pull all") {
 		t.Errorf("calls = %v", c.back.calls)
+	}
+	if r := <-reply; r.Err != nil || r.Result.Done != 1 {
+		t.Errorf("reply = %+v", r)
 	}
 }

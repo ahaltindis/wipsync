@@ -52,8 +52,31 @@ const (
 	PushAll               // app.PushAll, for every folder
 )
 
-func (a Action) String() string {
-	return [...]string{"pull all", "push all"}[a]
+var actionNames = [...]string{"pull all", "push all"}
+
+func (a Action) String() string { return actionNames[a] }
+
+// ParseAction is the action String names.
+func ParseAction(s string) (Action, bool) {
+	for i, name := range actionNames {
+		if name == s {
+			return Action(i), true
+		}
+	}
+	return 0, false
+}
+
+// Request asks the watcher for an action. Reply, if not nil, is given how
+// it went.
+type Request struct {
+	Action Action
+	Reply  chan<- Reply
+}
+
+// Reply is how an action went.
+type Reply struct {
+	Result app.AllResult
+	Err    error
 }
 
 // Watcher runs the loop. Open is called again every Poll, so that folders
@@ -67,7 +90,7 @@ type Watcher struct {
 	// Show is given the status whenever it changes; it may be nil.
 	Show func(Status)
 	// Asks brings actions to run between rounds; it may be nil.
-	Asks <-chan Action
+	Asks <-chan Request
 
 	back     Backend
 	opened   time.Time
@@ -110,8 +133,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-		case a := <-w.Asks:
-			w.Do(ctx, time.Now(), a)
+		case r := <-w.Asks:
+			res, err := w.Do(ctx, time.Now(), r.Action)
+			if r.Reply != nil {
+				r.Reply <- Reply{res, err}
+			}
 		}
 	}
 }
@@ -210,13 +236,14 @@ func (w *Watcher) notify(ctx context.Context, now time.Time, title, body string,
 
 // Do runs an action, logs how it went for each folder, and tells the
 // outcome on the desktop. The repository is read again right after.
-func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) {
+func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) (app.AllResult, error) {
 	defer w.show()
 	w.reopen(now)
 	if w.back == nil {
-		w.say(now, "cannot %s: the client cannot be opened", a)
-		w.notify(ctx, now, "wipsync: "+a.String(), "The client cannot be opened; see journalctl --user -u wipsync.", true)
-		return
+		err := errors.New("the service cannot open the client; see journalctl --user -u wipsync")
+		w.say(now, "cannot %s: %v", a, err)
+		w.notify(ctx, now, "wipsync: "+a.String(), err.Error(), true)
+		return app.AllResult{}, err
 	}
 	w.acting, w.isActing = a, true
 	w.show()
@@ -235,7 +262,7 @@ func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) {
 			w.say(now, "cannot %s: %v", a, err)
 			w.notify(ctx, now, "wipsync: "+a.String(), err.Error(), true)
 		}
-		return
+		return res, err
 	}
 	for _, l := range res.Lines {
 		w.say(now, "%s", l)
@@ -246,6 +273,7 @@ func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) {
 		body += "\n\n" + strings.Join(res.Failed, "\n")
 	}
 	w.notify(ctx, now, "wipsync: "+a.String(), body, len(res.Failed) > 0)
+	return res, nil
 }
 
 func (w *Watcher) reopen(now time.Time) {

@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
 func TestPushAndPullAll(t *testing.T) {
@@ -63,5 +69,52 @@ func TestPushAndPullAll(t *testing.T) {
 		if _, err := a.run("", args...); err == nil || !strings.Contains(err.Error(), "--all") {
 			t.Errorf("%v: err = %v", args, err)
 		}
+	}
+}
+
+// With wipsync watch running, it does the work, and the CLI prints how it
+// went. Without it, the CLI does the work itself.
+func TestAllThroughService(t *testing.T) {
+	a := newEnv(t)
+	a.repo()
+	a.write("Projects/app/main.py", "print(1)\n")
+	dir := filepath.Join(a.home, "Projects/app")
+	a.must("", "add", dir)
+	a.must("", "snapshot", dir)
+
+	sock, ok := watch.SocketPath(a.db().Path)
+	if !ok {
+		t.Fatal("no socket path")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	asks := make(chan watch.Request)
+	done := make(chan error, 1)
+	go func() { done <- watch.Serve(ctx, sock, asks) }()
+	var asked []watch.Action
+	go func() {
+		for r := range asks {
+			asked = append(asked, r.Action)
+			r.Reply <- watch.Reply{Result: app.AllResult{Verb: "push", Done: 1, Lines: []string{"Projects/app: from the service"}}}
+		}
+	}()
+	for range 200 {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if out := a.must("", "push", "--all"); out != "Projects/app: from the service\npushed 1 folder\n" {
+		t.Errorf("through the service:\n%s", out)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0] != watch.PushAll {
+		t.Errorf("asked %v", asked)
+	}
+	// The service is gone: the CLI pushes itself.
+	if out := a.must("", "push", "--all"); !strings.Contains(out, "Projects/app: master is now ") {
+		t.Errorf("without the service:\n%s", out)
 	}
 }

@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
 func pushCmd() *cobra.Command {
@@ -25,7 +27,8 @@ saw it. If another client pushed in between, pull first.
 With --all, push does this for every folder on this client that has a
 snapshot master does not. A folder that changed since its latest snapshot
 fails, and so does one whose master another client moved; the others are
-pushed all the same.`,
+pushed all the same. When wipsync watch runs, it does the work, so that its
+tray icon shows it and the desktop is told how it went.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && len(args) > 0 {
@@ -36,8 +39,9 @@ pushed all the same.`,
 				return err
 			}
 			if all {
-				res, err := a.PushAll(cmd.Context(), app.Scope{})
-				return printAll(cmd, res, err)
+				return runAll(cmd, a, watch.PushAll, func() (app.AllResult, error) {
+					return a.PushAll(cmd.Context(), app.Scope{})
+				})
 			}
 			f, err := folderArg(a, args, 0)
 			if err != nil {
@@ -55,9 +59,19 @@ pushed all the same.`,
 	return cmd
 }
 
-// printAll prints how a pull or push of all folders went, a line per
-// folder and then the summary. It fails if any folder did.
-func printAll(cmd *cobra.Command, res app.AllResult, err error) error {
+// runAll runs a pull or push of all folders in the service, when it runs
+// for this client: the tray's icon shows it, and the desktop is told how it
+// went. Without it, run does it here. Either way it prints a line per
+// folder and then the summary, and fails if any folder did.
+func runAll(cmd *cobra.Command, a *app.App, action watch.Action, run func() (app.AllResult, error)) error {
+	var res app.AllResult
+	err := watch.ErrNoService
+	if sock, ok := watch.SocketPath(a.DB.Path); ok {
+		res, err = watch.Ask(cmd.Context(), sock, action)
+	}
+	if errors.Is(err, watch.ErrNoService) {
+		res, err = run()
+	}
 	if err != nil {
 		return err
 	}

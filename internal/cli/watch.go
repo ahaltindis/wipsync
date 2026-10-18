@@ -70,6 +70,17 @@ This is what the wipsync user service runs:
 			for _, note := range a.Notes {
 				w.Log.Print(note)
 			}
+			// What the tray's menu and the socket ask for. A click while
+			// an action waits is dropped; a request on the socket waits.
+			asks := make(chan watch.Request, 1)
+			w.Asks = asks
+			if sock, ok := watch.SocketPath(a.DB.Path); ok {
+				go func() {
+					if err := watch.Serve(cmd.Context(), sock, asks); err != nil {
+						w.Log.Printf("cannot take requests from pull --all and push --all: %v", err)
+					}
+				}()
+			}
 			if cfg := a.Config.Tray; !cfg.Hide {
 				open := cfg.Open
 				if open == "" {
@@ -79,16 +90,12 @@ This is what the wipsync user service runs:
 					}
 					open = tray.DefaultOpen(binary, a.ConfigPath)
 				}
-				// One action waits at most: what is picked while one waits
-				// is dropped, and the menu is greyed out while one runs.
-				asks := make(chan watch.Action, 1)
 				ask := func(a watch.Action) {
 					select {
-					case asks <- a:
+					case asks <- watch.Request{Action: a}:
 					default:
 					}
 				}
-				w.Asks = asks
 				w.Show = tray.Start(cmd.Context(), open, ask, w.Log).Show
 			}
 			return w.Run(cmd.Context())

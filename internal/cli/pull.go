@@ -11,6 +11,7 @@ import (
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/db"
+	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
 func pullCmd() *cobra.Command {
@@ -35,7 +36,8 @@ for its location once and remembers it.
 With --all, pull brings master into every folder on this client that is
 behind it, and into every folder that is not here yet but whose root is.
 Folders that changed on both sides, and those whose root is not set up
-here, are left alone.`,
+here, are left alone. When wipsync watch runs, it does the work, so that
+its tray icon shows it and the desktop is told how it went.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && (len(args) > 0 || from != "" || rootFlag != "") {
@@ -46,8 +48,9 @@ here, are left alone.`,
 				return err
 			}
 			if all {
-				res, err := a.PullAll(cmd.Context(), app.Scope{})
-				return printAll(cmd, res, err)
+				return runAll(cmd, a, watch.PullAll, func() (app.AllResult, error) {
+					return a.PullAll(cmd.Context(), app.Scope{})
+				})
 			}
 			arg := ""
 			if len(args) == 1 {

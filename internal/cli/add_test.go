@@ -34,6 +34,8 @@ func (e *env) use() {
 	e.t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
 	e.t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
 	e.t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
+	// Never the real one, where the user's own wipsync watch answers.
+	e.t.Setenv("XDG_RUNTIME_DIR", filepath.Join(base, "run"))
 }
 
 func (e *env) mkdir(rel string) string {
