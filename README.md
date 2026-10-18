@@ -78,4 +78,4 @@ From a clean, pushed `main`, it:
 2. Creates and pushes the tag, then waits for the release workflow to build wipsync and attach
    `wipsync-<version>-x86_64.tar.gz` (and its `.sha256`) to a GitHub release.
 3. Puts the checksum in `pkg/PKGBUILD`, regenerates `pkg/.SRCINFO`, commits and pushes.
-4. Clones the AUR package to a temporary folder, copies `PKGBUILD` and `.SRCINFO` there, commits and pushes.
+4. Clones the AUR package to a temporary folder, copies `PKGBUILD`, `.SRCINFO` and `wipsync.install` there, commits and pushes.

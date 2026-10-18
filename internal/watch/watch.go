@@ -1,6 +1,7 @@
 // Package watch keeps a client's folders snapshotted. It looks at each
 // folder every so often, and snapshots one that changed once it has been
-// quiet for a while. It never pulls or pushes.
+// quiet for a while. It pulls or pushes only when asked to, such as from
+// the tray's menu.
 package watch
 
 import (
@@ -39,6 +40,20 @@ type Backend interface {
 	Reach(ctx context.Context) error
 	Survey(ctx context.Context) (app.World, error)
 	ClientName() string
+	PullAll(ctx context.Context, scope app.Scope) (app.AllResult, error)
+	PushAll(ctx context.Context, scope app.Scope) (app.AllResult, error)
+}
+
+// Action is what the watcher can be asked to do between its rounds.
+type Action int
+
+const (
+	PullAll Action = iota // app.PullAll, for every folder
+	PushAll               // app.PushAll, for every folder
+)
+
+func (a Action) String() string {
+	return [...]string{"pull all", "push all"}[a]
 }
 
 // Watcher runs the loop. Open is called again every Poll, so that folders
@@ -51,6 +66,8 @@ type Watcher struct {
 	Notify func(ctx context.Context, title, body string, urgent bool) error
 	// Show is given the status whenever it changes; it may be nil.
 	Show func(Status)
+	// Asks brings actions to run between rounds; it may be nil.
+	Asks <-chan Action
 
 	back     Backend
 	opened   time.Time
@@ -67,8 +84,10 @@ type Watcher struct {
 	known     map[string]bool      // folders not on this client, as of the last check
 	notifyErr string
 
-	recent   []Event  // newest first, at most Recent
-	snapping string   // the folder being snapshotted, if any
+	recent   []Event // newest first, at most Recent
+	snapping string  // the folder being snapshotted, if any
+	acting   Action  // the action running, while isActing
+	isActing bool
 	behind   []string // the folders with something to take, as of the last check
 	shown    *Status
 }
@@ -91,6 +110,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+		case a := <-w.Asks:
+			w.Do(ctx, time.Now(), a)
 		}
 	}
 }
@@ -169,10 +190,15 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 	if len(lines) > 1 {
 		title = fmt.Sprintf("wipsync: %d updates", len(lines))
 	}
+	w.notify(ctx, now, title, strings.Join(lines, "\n"), urgent)
+}
+
+// notify shows news on the desktop, and logs once why it cannot.
+func (w *Watcher) notify(ctx context.Context, now time.Time, title, body string, urgent bool) {
 	if w.Notify == nil {
 		return
 	}
-	if err := w.Notify(ctx, title, strings.Join(lines, "\n"), urgent); err != nil {
+	if err := w.Notify(ctx, title, body, urgent); err != nil {
 		if err.Error() != w.notifyErr {
 			w.say(now, "cannot notify: %v", err)
 			w.notifyErr = err.Error()
@@ -180,6 +206,46 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 	} else {
 		w.notifyErr = ""
 	}
+}
+
+// Do runs an action, logs how it went for each folder, and tells the
+// outcome on the desktop. The repository is read again right after.
+func (w *Watcher) Do(ctx context.Context, now time.Time, a Action) {
+	defer w.show()
+	w.reopen(now)
+	if w.back == nil {
+		w.say(now, "cannot %s: the client cannot be opened", a)
+		w.notify(ctx, now, "wipsync: "+a.String(), "The client cannot be opened; see journalctl --user -u wipsync.", true)
+		return
+	}
+	w.acting, w.isActing = a, true
+	w.show()
+	var res app.AllResult
+	var err error
+	switch a {
+	case PullAll:
+		res, err = w.back.PullAll(ctx, app.Scope{})
+	case PushAll:
+		res, err = w.back.PushAll(ctx, app.Scope{})
+	}
+	w.isActing = false
+	w.nextCheck = time.Time{}
+	if err != nil {
+		if ctx.Err() == nil {
+			w.say(now, "cannot %s: %v", a, err)
+			w.notify(ctx, now, "wipsync: "+a.String(), err.Error(), true)
+		}
+		return
+	}
+	for _, l := range res.Lines {
+		w.say(now, "%s", l)
+	}
+	w.say(now, "%s: %s", a, res.Summary())
+	body := res.Summary()
+	if len(res.Failed) > 0 {
+		body += "\n\n" + strings.Join(res.Failed, "\n")
+	}
+	w.notify(ctx, now, "wipsync: "+a.String(), body, len(res.Failed) > 0)
 }
 
 func (w *Watcher) reopen(now time.Time) {

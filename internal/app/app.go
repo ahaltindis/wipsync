@@ -214,6 +214,11 @@ func Describe(s restic.Snapshot) string {
 		s.ID[:8], s.Time.Local().Format("2006-01-02 15:04"), Age(time.Since(s.Time)), s.Host)
 }
 
+// Brief names a snapshot in a few words: its ID, client and age.
+func Brief(s restic.Snapshot) string {
+	return fmt.Sprintf("%s (%s, %s)", s.ID[:8], s.Host, Age(time.Since(s.Time)))
+}
+
 // Age describes how long ago something happened.
 func Age(d time.Duration) string {
 	plural := func(n int, unit string) string {

@@ -66,7 +66,7 @@ func TestPullOnNewClient(t *testing.T) {
 	rootB := filepath.Join(b.home, "Projects")
 	dirB := filepath.Join(rootB, "Freelance/app")
 	if !strings.Contains(out, "Where is Projects on this machine? ["+rootB+"]") ||
-		!strings.Contains(out, "pulled "+name+" into "+dirB+": ") || !strings.Contains(out, "by client-a") {
+		!strings.Contains(out, "pulled "+name+" into "+dirB+": ") || !strings.Contains(out, "(client-a, ") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 	if got := b.read("Projects/Freelance/app/main.py"); got != "print(1)\n" {
@@ -123,7 +123,7 @@ func TestPullOnNewClient(t *testing.T) {
 	if len(all) != 2 || all[1].Hostname != "client-b" || all[1].Parent != pulled {
 		t.Fatalf("snapshots = %+v", all)
 	}
-	if out := b.must("", "push", dirB); !strings.Contains(out, "master is now ") || !strings.Contains(out, "by client-b") {
+	if out := b.must("", "push", dirB); !strings.Contains(out, "master is now ") || !strings.Contains(out, "(client-b, ") {
 		t.Errorf("unexpected push output: %s", out)
 	}
 
@@ -372,10 +372,10 @@ func TestPullExisting(t *testing.T) {
 	a.use()
 	t.Chdir(dirA)
 	out := a.must("", "pull")
-	if !strings.Contains(out, "pulled Projects/app: "+fromB[:8]) || !strings.Contains(out, "by client-b") {
+	if !strings.Contains(out, "pulled Projects/app: "+fromB[:8]) || !strings.Contains(out, "(client-b, ") {
 		t.Errorf("unexpected output: %s", out)
 	}
-	if strings.Contains(out, "saved its current state") {
+	if strings.Contains(out, "saved as snapshot") {
 		t.Errorf("took a snapshot of an unchanged folder: %s", out)
 	}
 	if got := a.read("Projects/app/main.py"); got != "print(2222)\n" {
@@ -456,7 +456,7 @@ func TestPullDiverged(t *testing.T) {
 	}
 	// The local state was saved first, and is what the message points to.
 	saved := a.base("Projects", "app")
-	if saved == start || !strings.Contains(out, "saved its current state as snapshot "+saved[:8]) ||
+	if saved == start || !strings.Contains(out, "its state before is saved as snapshot "+saved[:8]) ||
 		!strings.Contains(err.Error(), "saved as snapshot "+saved[:8]) {
 		t.Errorf("out = %q, err = %v", out, err)
 	}
@@ -465,7 +465,7 @@ func TestPullDiverged(t *testing.T) {
 	}
 	// Asking again changes nothing, and takes no second snapshot.
 	out, err = a.run("", "pull", dirA)
-	if err == nil || strings.Contains(out, "saved its current state") || a.base("Projects", "app") != saved {
+	if err == nil || strings.Contains(out, "saved as snapshot") || a.base("Projects", "app") != saved {
 		t.Errorf("out = %q, err = %v", out, err)
 	}
 }
@@ -514,7 +514,7 @@ func TestPullAfterGitStatus(t *testing.T) {
 	a.must("", "push", dirA)
 
 	out := b.must("", "pull", dirB)
-	if !strings.Contains(out, "pulled Projects/app: ") || strings.Contains(out, "saved its current state") {
+	if !strings.Contains(out, "pulled Projects/app: ") || strings.Contains(out, "saved as snapshot") {
 		t.Errorf("unexpected output: %s", out)
 	}
 	if got := b.read("Projects/app/main.py"); got != "print(2222)\n" {

@@ -28,6 +28,29 @@ type fake struct {
 
 	world   app.World
 	surveys int
+
+	all    app.AllResult // what PullAll and PushAll return
+	allErr error
+	during func() // called while PullAll or PushAll runs
+}
+
+func (f *fake) PullAll(_ context.Context, s app.Scope) (app.AllResult, error) {
+	return f.runAll("pull all", s)
+}
+
+func (f *fake) PushAll(_ context.Context, s app.Scope) (app.AllResult, error) {
+	return f.runAll("push all", s)
+}
+
+func (f *fake) runAll(call string, s app.Scope) (app.AllResult, error) {
+	if s.Root != "" || s.Folders != nil {
+		call += " of some"
+	}
+	f.calls = append(f.calls, call)
+	if f.during != nil {
+		f.during()
+	}
+	return f.all, f.allErr
 }
 
 func (f *fake) Survey(context.Context) (app.World, error) {

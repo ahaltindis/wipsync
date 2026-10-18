@@ -79,7 +79,17 @@ This is what the wipsync user service runs:
 					}
 					open = tray.DefaultOpen(binary, a.ConfigPath)
 				}
-				w.Show = tray.Start(cmd.Context(), open, w.Log).Show
+				// One action waits at most: what is picked while one waits
+				// is dropped, and the menu is greyed out while one runs.
+				asks := make(chan watch.Action, 1)
+				ask := func(a watch.Action) {
+					select {
+					case asks <- a:
+					default:
+					}
+				}
+				w.Asks = asks
+				w.Show = tray.Start(cmd.Context(), open, ask, w.Log).Show
 			}
 			return w.Run(cmd.Context())
 		},

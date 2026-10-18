@@ -87,12 +87,61 @@ func (f *fake) FindTarget(_ context.Context, fo db.Folder, from string) (app.Tar
 
 func (f *fake) Fetch(_ context.Context, fo db.Folder, rootDir string, t app.Target) (app.PullResult, error) {
 	err := f.did("fetch " + fo.String() + " into " + rootDir)
-	return app.PullResult{Outcome: app.Pulled, Target: t.Snapshot, Dir: rootDir + "/" + fo.Path}, err
+	return app.PullResult{Outcome: app.Pulled, Target: t.Snapshot, Dir: rootDir + "/" + fo.Path, New: true}, err
 }
 
 func (f *fake) Restore(_ context.Context, fo db.Folder, name string) (app.RestoreResult, error) {
 	err := f.did("restore " + fo.String() + " to " + name[:8])
 	return app.RestoreResult{Target: snap("b1", "", "desktop", 90), Undo: strings.Repeat("7", 64)}, err
+}
+
+// scope says what a pull or push of many folders was given.
+func scope(s app.Scope) string {
+	var parts []string
+	if s.Root != "" {
+		parts = append(parts, "under "+s.Root)
+	}
+	for _, fo := range s.Folders {
+		parts = append(parts, fo.String())
+	}
+	if s.NewRoot != "" {
+		parts = append(parts, "with "+s.NewRoot+" at "+s.NewRootDir)
+	}
+	return strings.Join(parts, " ")
+}
+
+func (f *fake) PullAll(_ context.Context, s app.Scope) (app.AllResult, error) {
+	err := f.did("pull all " + scope(s))
+	return f.all("pull", s), err
+}
+
+func (f *fake) PushAll(_ context.Context, s app.Scope) (app.AllResult, error) {
+	err := f.did("push all " + scope(s))
+	return f.all("push", s), err
+}
+
+// all is the result of a pull or push of many folders: of those in scope
+// that the real one acts on, the ones named in fail failed and the others
+// went through.
+func (f *fake) all(verb string, s app.Scope) app.AllResult {
+	res := app.AllResult{Verb: verb, Root: s.Root}
+	for _, st := range f.world.Folders {
+		fo := st.Folder
+		if s.Root != "" && fo.Root != s.Root || s.Folders != nil && !slices.ContainsFunc(s.Folders, func(g db.Folder) bool { return g.String() == fo.String() }) {
+			continue
+		}
+		pull := st.Status == app.Behind || st.Status == app.NotHere && st.Master != ""
+		push := st.Status == app.Ahead || st.Status == app.Diverged || st.Status == app.Changed
+		if verb == "pull" && !pull || verb == "push" && !push {
+			continue
+		}
+		if err := f.fail[verb+" "+fo.String()]; err != nil {
+			res.Failed = append(res.Failed, err.Error())
+		} else {
+			res.Done++
+		}
+	}
+	return res
 }
 
 func (f *fake) RootDir(root string) (string, bool) {
@@ -351,7 +400,7 @@ func TestHints(t *testing.T) {
 		{"a folder that is not here", []string{"j"}, "Folder · Projects/aha/website",
 			"p pull  R refresh  ? help  q quit  " + move + "  l log  tab browse  space mark  / search"},
 		{"a root", []string{"g"}, "Root · Projects",
-			"p pull all  o open here  O open in window  R refresh  ? help  q quit  " + move + "  tab browse  space mark  / search"},
+			"P push all  p pull all  o open here  O open in window  R refresh  ? help  q quit  " + move + "  tab browse  space mark  / search"},
 		{"a snapshot in the log", []string{"j", "l"}, "Log · Projects/aha/archype · b1b1b1b1",
 			"r restore this snapshot  o open here  O open in window  R refresh  ? help  q quit  " + move + "  h folders  tab browse"},
 	}
@@ -553,7 +602,7 @@ func TestPullMaster(t *testing.T) {
 	if want := []string{"pull " + name + " from "}; !slices.Equal(back.calls, want) {
 		t.Errorf("calls = %v, want %v", back.calls, want)
 	}
-	if !strings.HasPrefix(m.note, "pulled "+name+": b2b2b2b2 (desktop, ") || !strings.HasSuffix(m.note, "; state before saved as 77777777") {
+	if !strings.HasPrefix(m.note, "pulled "+name+": b2b2b2b2 (desktop, ") || !strings.HasSuffix(m.note, "; its state before is saved as snapshot 77777777") {
 		t.Errorf("note = %q", m.note)
 	}
 
@@ -657,23 +706,18 @@ func TestPullAll(t *testing.T) {
 	if !strings.Contains(screen, "Pull 2 folders under Projects?") || !strings.Contains(asks(m), "1 behind master, 1 not on this client yet") {
 		t.Errorf("unexpected confirmation:\n%s", screen)
 	}
-	back.fail = map[string]error{"pull Projects/Freelance/kadir/boxing-machine from ": errors.New("both this folder and master changed")}
+	back.fail = map[string]error{"pull Projects/Freelance/kadir/boxing-machine": errors.New("Projects/Freelance/kadir/boxing-machine: both this folder and master changed")}
 	m = run(t, m, "y")
-	want := []string{
-		"pull Projects/Freelance/kadir/boxing-machine from ",
-		"target Projects/aha/website from ",
-		"fetch Projects/aha/website into /home/u/Projects",
-	}
-	if !slices.Equal(back.calls, want) {
+	if want := []string{"pull all under Projects"}; !slices.Equal(back.calls, want) {
 		t.Errorf("calls = %v, want %v", back.calls, want)
 	}
 	// One failed and one went through: both are reported.
 	screen = m.View()
-	if !strings.Contains(asks(m), "1 of 2 folders failed") || !strings.Contains(asks(m), "Projects/Freelance/kadir/boxing-machine: both this folder and master changed") {
+	if !strings.Contains(asks(m), "1 of 2 failed") || !strings.Contains(asks(m), "Projects/Freelance/kadir/boxing-machine: both this folder and master changed") {
 		t.Errorf("the failure is not reported:\n%s", screen)
 	}
 	m = keys(t, m, "enter")
-	if got := bottom(m); got != "pulled 1 of 2 folders under Projects" {
+	if got := bottom(m); got != "pulled 1 of 2 folders under Projects, 1 failed" {
 		t.Errorf("bottom line = %q", got)
 	}
 
@@ -682,6 +726,28 @@ func TestPullAll(t *testing.T) {
 	m = keys(t, m, "G", "k", "k", "p") // the root notes: one ahead, one both changed
 	if !strings.Contains(asks(m), "Nothing to pull") || len(back.calls) != 0 {
 		t.Errorf("unexpected box: %s", asks(m))
+	}
+}
+
+func TestPushAll(t *testing.T) {
+	m, back := started(t, 100, 20)
+	m = keys(t, goTo(t, m, "notes"), "P") // one ahead, one both changed
+	if !strings.Contains(asks(m), "Push all of notes?") || !strings.Contains(asks(m), "Makes the latest snapshot of 2 folders master.") {
+		t.Fatalf("unexpected confirmation: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	if want := []string{"push all under notes"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if got := bottom(m); got != "pushed 2 folders under notes" {
+		t.Errorf("bottom line = %q", got)
+	}
+
+	// Projects has nothing ahead, and one folder changed: that one fails.
+	back.calls = nil
+	m = keys(t, goTo(t, m, "Projects"), "P")
+	if text := asks(m); strings.Contains(text, "Makes") || !strings.Contains(text, "1 folder changed since the latest snapshot") {
+		t.Errorf("unexpected confirmation: %s", text)
 	}
 }
 
@@ -1042,10 +1108,10 @@ func TestMarkingFolders(t *testing.T) {
 	}
 	back.fail = map[string]error{"push notes/recipes": errors.New("notes/recipes: push rejected")}
 	m = run(t, m, "P")
-	if want := []string{"push notes/journal", "push notes/recipes"}; !slices.Equal(back.calls, want) {
+	if want := []string{"push all notes/journal notes/recipes"}; !slices.Equal(back.calls, want) {
 		t.Errorf("calls = %v, want %v", back.calls, want)
 	}
-	if !strings.Contains(asks(m), "1 of 2 failed") || !strings.Contains(asks(m), "notes/recipes: push rejected") || m.note != "pushed 1 of 2 folders" {
+	if !strings.Contains(asks(m), "1 of 2 failed") || !strings.Contains(asks(m), "notes/recipes: push rejected") || m.note != "pushed 1 of 2 folders, 1 failed" {
 		t.Errorf("box: %s, note: %q", asks(m), m.note)
 	}
 	m = keys(t, m, "enter")
@@ -1068,16 +1134,13 @@ func TestPullingMarked(t *testing.T) {
 		t.Error("n pulled, or dropped the marks")
 	}
 	m = run(t, m, "y")
-	want := []string{
-		"pull Projects/aha/archype from ",
-		"target Projects/aha/website from ", "fetch Projects/aha/website into /home/u/Projects",
-		"pull Projects/aha/wipsync from ",
-		"pull Projects/Freelance/kadir/boxing-machine from ",
-	}
+	want := []string{"pull all Projects/aha/archype Projects/aha/website Projects/aha/wipsync Projects/Freelance/kadir/boxing-machine"}
 	if !slices.Equal(back.calls, want) {
 		t.Errorf("calls = %v\nwant    %v", back.calls, want)
 	}
-	if m.note != "pulled 4 of 4 folders" || m.marked().any() {
+	// Of the four, one is behind and one is not here: the others have
+	// nothing to pull.
+	if m.note != "pulled 2 folders" || m.marked().any() {
 		t.Errorf("note = %q, still marked: %v", m.note, m.marked().any())
 	}
 
@@ -1094,8 +1157,8 @@ func TestPullingMarked(t *testing.T) {
 		t.Fatalf("the root was not asked for: %s", asks(m))
 	}
 	m = run(t, keys(t, m, "enter"), "y")
-	if got := back.calls; len(got) != 4 || got[1] != "fetch Work/a into /home/u/Work" || got[3] != "fetch Work/b into /home/u/Work" {
-		t.Errorf("calls = %v", got)
+	if want := []string{"pull all Work/a Work/b with Work at /home/u/Work"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
 	}
 	m = keys(t, goTo(t, m, "Work"), " ")
 	m = keys(t, goTo(t, m, "Zeta"), " ", "p")

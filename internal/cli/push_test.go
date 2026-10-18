@@ -42,8 +42,7 @@ func TestPush(t *testing.T) {
 	must("snapshot", dir)
 	first, _ := store.Base(root, path)
 	out := must("push", dir)
-	if !strings.HasPrefix(out, "Projects/app: master is now "+first[:8]+", the snapshot from ") ||
-		!strings.Contains(out, "(just now) by client-a") {
+	if !strings.HasPrefix(out, "Projects/app: master is now "+first[:8]+" (client-a, just now)") {
 		t.Errorf("unexpected output: %s", out)
 	}
 	if got, _ := pointers.Master(ctx, root, path); got != first {

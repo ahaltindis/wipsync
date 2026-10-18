@@ -19,7 +19,7 @@ type State int
 const (
 	UpToDate     State = iota // everything here is on the server, nothing to take
 	Behind                    // master moved, or another client has newer work
-	Snapshotting              // a snapshot is being sent
+	Snapshotting              // a snapshot is being sent, or an action runs
 	Offline                   // the server does not answer
 )
 
@@ -39,6 +39,7 @@ type Status struct {
 	State  State
 	Detail string
 	Events []Event
+	Acting bool // an action runs; another is not taken until it is done
 }
 
 // say logs a line and keeps it as a recent event.
@@ -53,8 +54,11 @@ func (w *Watcher) say(now time.Time, format string, args ...any) {
 
 // status is the watcher's Status now.
 func (w *Watcher) status() Status {
-	st := Status{State: UpToDate, Detail: "up to date", Events: w.recent}
+	st := Status{State: UpToDate, Detail: "up to date", Events: w.recent, Acting: w.isActing}
 	switch {
+	case w.isActing:
+		st.State = Snapshotting
+		st.Detail = "running " + w.acting.String()
 	case w.offline:
 		st.State = Offline
 		st.Detail = "server unreachable, trying again at " + w.nextPing.Local().Format("15:04")
@@ -75,7 +79,7 @@ func (w *Watcher) show() {
 	}
 	st := w.status()
 	if w.shown != nil && st.State == w.shown.State && st.Detail == w.shown.Detail &&
-		slices.Equal(st.Events, w.shown.Events) {
+		st.Acting == w.shown.Acting && slices.Equal(st.Events, w.shown.Events) {
 		return
 	}
 	w.shown = &st

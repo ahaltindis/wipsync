@@ -89,6 +89,7 @@ type PullResult struct {
 	Outcome PullOutcome
 	Target  restic.Snapshot
 	Dir     string // where the folder is on this client
+	New     bool   // the folder was not on this client before
 
 	// Saved is the snapshot taken of the folder's state first, if it had
 	// changed. It is set even when the pull then fails.
@@ -183,7 +184,7 @@ func (a *App) CheckNewRoot(root, dir string) error {
 // location of its root here.
 func (a *App) Fetch(ctx context.Context, f db.Folder, rootDir string, t Target) (PullResult, error) {
 	dir := filepath.Join(rootDir, filepath.FromSlash(f.Path))
-	res := PullResult{Outcome: Pulled, Target: t.Snapshot, Dir: dir}
+	res := PullResult{Outcome: Pulled, Target: t.Snapshot, Dir: dir, New: true}
 	unlock, err := a.lock(f)
 	if err != nil {
 		return res, err

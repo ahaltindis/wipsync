@@ -77,7 +77,8 @@ Compared per file against the common base snapshot:
   out: it would only shorten that delay, at the cost of a watch per directory and rescans for what
   it misses. Before sending anything it asks the server, with one ssh call and a 10 second connect
   timeout; while the server does not answer it sends nothing and asks again after 5 minutes, then
-  10, 20, and every 30. It logs to the journal, each failure once. It never pulls or pushes.
+  10, 20, and every 30. It logs to the journal, each failure once. It pulls or pushes only when
+  asked from the tray's menu.
   Every 5 minutes it reads the repository as the TUI does, and tells on the desktop
   (`notify-send`, one notification per check) what is new: master moved past this client's folder
   (urgent when the folder changed too), newer work on another client, a folder added on another
@@ -86,8 +87,8 @@ Compared per file against the common base snapshot:
   most once an hour per folder.
 - **TUI**: `wipsync tui`, in the same binary, built with Bubble Tea. Folders under their roots on
   the left, coloured by what is due (snapshot, push, pull); the selected folder's snapshots on the
-  right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest;
-on a root, everything under it), `r` restore. Pull and restore ask first. Space marks lines, and
+  right. Keys act on the selection: `s` snapshot, `P` push, `p` pull (master, or a client's latest),
+  `r` restore; on a root, `P` and `p` push or pull all of it. Pull and restore ask first. Space marks lines, and
   the keys then act on everything marked. `/` searches the left pane as it is typed. `Tab` turns the left pane
   into a directory browser, where roots, tracked folders, other directories and files each have
   their colour, and `a` adds the selected directory. `o` opens the directory in the TUI's
@@ -124,15 +125,27 @@ on a root, everything under it), `r` restore. Pull and restore ask first. Space 
   run on into two arrows round a circle, coloured by state; when several apply, the first wins: red server unreachable, yellow snapshotting, purple
   behind (master moved past a folder here, or another client has newer work, as of the last
   check), blue up to date. The tooltip is the state and the last 10 things the watcher logged, with
-  their times. A left click runs `[tray] open`, by default
+  their times. A right click opens a menu with Pull all and Push all, greyed out while one runs;
+  the service runs it between its rounds, logs a line per folder, tells the summary on the
+  desktop (urgent when a folder failed), and reads the repository again at once. A left click
+  runs `[tray] open`, by default
   `systemd-run --user --collect xdg-terminal-exec wipsync tui`: the service's unit stops everything
   in it with it (`KillMode=mixed`), so what the click opens must run outside it. `[tray] hide = true`
   shows no icon; that is also where a bar-specific output would go. Without a session bus or a
   tray it does nothing, and registers when a tray appears. The tray settings are read at start.
+- **Pull all, push all**: one command in `app`, `PullAll` and `PushAll`, which every front end
+  runs with a scope: `wipsync pull --all` and `push --all` (every folder), the TUI's `P` and `p`
+  on a root or on marked folders, and the tray's menu (every folder). It reads the repository
+  once, acts on each folder that has something due, goes on past failures, and returns a line per
+  folder and a summary, which each front end shows as is. Pull all takes master into folders that
+  are behind it and into those not here yet whose root has a directory here; a folder that also
+  changed here, or whose root has none, is left alone with a line on why. Push all makes the
+  latest snapshot master for folders that have one master does not; a folder changed since that
+  snapshot fails, as does one whose master another client moved, and a later push all takes it.
+  The CLI exits non-zero when a folder failed.
 - **Log**: what was sent and when, per folder.
 - **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, `__pycache__`).
-- Later: vicinae command; a right-click menu on the tray icon (pull all, push all, ...). Until
-  then a right click opens an empty menu.
+- Later: vicinae commands, running `wipsync pull --all` and `wipsync push --all`.
 
 ## Engine
 

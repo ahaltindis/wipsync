@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/db"
 )
 
 // marked is what the marks of the current view stand for.
@@ -167,18 +168,19 @@ func (m Model) snapshotMarked() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) pushMarked() (tea.Model, tea.Cmd) {
-	list := m.marked().here()
+	scope := app.Scope{Folders: dbFolders(m.marked().here())}
 	m.unmark()
-	n := len(list)
-	return m.start(fmt.Sprintf("pushing %d folders", n), "push every marked folder", func(ctx context.Context) (string, error) {
-		var failed []string
-		for _, f := range list {
-			if _, err := m.back.Push(ctx, f.Folder); err != nil {
-				failed = append(failed, err.Error())
-			}
-		}
-		return fmt.Sprintf("pushed %d of %d folders", n-len(failed), n), failures(failed, n)
+	return m.start(fmt.Sprintf("pushing %d folders", len(scope.Folders)), "push every marked folder", func(ctx context.Context) (string, error) {
+		return all(m.back.PushAll(ctx, scope))
 	})
+}
+
+func dbFolders(list []*app.FolderState) []db.Folder {
+	out := make([]db.Folder, len(list))
+	for i, f := range list {
+		out[i] = f.Folder
+	}
+	return out
 }
 
 // askPullMarked confirms pulling master into every marked folder. A root
@@ -209,31 +211,19 @@ func (m Model) askPullMarked() (tea.Model, tea.Cmd) {
 		if missing > 0 {
 			text += fmt.Sprintf(", %d are not on this client yet and are created", missing)
 		}
-		text += ". Folders that changed here are refused and reported. Each folder's current state is saved as a snapshot first."
+		text += ". Folders that changed here as well are left alone and reported. Each folder's current state is saved as a snapshot first."
 		m.dialog = &dialog{
 			title:   fmt.Sprintf("Pull %d marked folders?", n),
 			text:    text,
 			confirm: true,
 			done: func(m Model, _ string) (tea.Model, tea.Cmd) {
 				m.unmark()
+				scope := app.Scope{Folders: dbFolders(k.folders)}
+				if len(unknown) == 1 {
+					scope.NewRoot, scope.NewRootDir = unknown[0], asked
+				}
 				return m.start(fmt.Sprintf("pulling %d folders", n), "pull every marked folder", func(ctx context.Context) (string, error) {
-					var failed []string
-					for _, f := range k.folders {
-						var err error
-						if f.Dir != "" {
-							_, err = pull(ctx, m.back, f.Folder, "")
-						} else {
-							rootDir, known := m.back.RootDir(f.Folder.Root)
-							if !known {
-								rootDir = asked
-							}
-							_, err = fetch(ctx, m.back, f.Folder, rootDir, "")
-						}
-						if err != nil {
-							failed = append(failed, f.Folder.String()+": "+err.Error())
-						}
-					}
-					return fmt.Sprintf("pulled %d of %d folders", n-len(failed), n), failures(failed, n)
+					return all(m.back.PullAll(ctx, scope))
 				})
 			},
 		}

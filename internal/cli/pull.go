@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 func pullCmd() *cobra.Command {
 	var from, rootFlag string
+	var all bool
 	cmd := &cobra.Command{
 		Use:   "pull [folder]",
 		Short: "Bring master, or a client's latest snapshot, into a folder",
@@ -28,12 +30,24 @@ changes nothing.
 For a folder that is not on this client yet, name it as "wipsync list"
 shows it, for example Projects/Freelance/kadir/boxing-machine. If this
 client does not know where the folder's root is, here "Projects", pull asks
-for its location once and remembers it.`,
+for its location once and remembers it.
+
+With --all, pull brings master into every folder on this client that is
+behind it, and into every folder that is not here yet but whose root is.
+Folders that changed on both sides, and those whose root is not set up
+here, are left alone.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && (len(args) > 0 || from != "" || rootFlag != "") {
+				return errors.New("--all pulls master into every folder; it takes no folder, --from or --root")
+			}
 			a, err := open(cmd)
 			if err != nil {
 				return err
+			}
+			if all {
+				res, err := a.PullAll(cmd.Context(), app.Scope{})
+				return printAll(cmd, res, err)
 			}
 			arg := ""
 			if len(args) == 1 {
@@ -51,23 +65,13 @@ for its location once and remembers it.`,
 					return fmt.Errorf("%s is already on this client, at %s; --root is for a folder that is not", f, a.Data.Dir(f))
 				}
 				res, err := a.Pull(ctx, f, from)
-				if res.Saved != "" {
-					fmt.Fprintf(out, "%s: saved its current state as snapshot %s\n", f, res.Saved[:8])
-				}
 				if err != nil {
+					if l := res.SavedLine(f); l != "" {
+						fmt.Fprintln(out, l)
+					}
 					return err
 				}
-				switch res.Outcome {
-				case app.AlreadyThere:
-					fmt.Fprintf(out, "%s: already at %s\n", f, app.Describe(res.Target))
-				case app.AheadOfTarget:
-					fmt.Fprintf(out, "%s: nothing to pull, this client is ahead of %s\n", f, app.Describe(res.Target))
-				default:
-					if res.IgnoreChanged {
-						fmt.Fprintf(out, "%s: its ignore rules are now %s\n", f, strings.Join(res.Ignore, ", "))
-					}
-					fmt.Fprintf(out, "pulled %s: %s\n", f, app.Describe(res.Target))
-				}
+				fmt.Fprintln(out, res.Line(f))
 				return nil
 			} else if arg == "" {
 				return fmt.Errorf("%w, or name a folder as Root/path to fetch it", err)
@@ -91,11 +95,12 @@ for its location once and remembers it.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "pulled %s into %s: %s\n", f, res.Dir, app.Describe(res.Target))
+			fmt.Fprintln(out, res.Line(f))
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "take this client's latest snapshot instead of master")
+	cmd.Flags().BoolVar(&all, "all", false, "pull master into every folder that is behind it or not here yet")
 	cmd.Flags().StringVar(&rootFlag, "root", "", "where the folder's root is on this machine, for a folder that is not here yet")
 	return cmd
 }

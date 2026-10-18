@@ -7,13 +7,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/db"
-	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
 // action is something a key does to what is selected.
@@ -46,7 +44,7 @@ func (m Model) selectionActions() []action {
 				{"p", "pull", Model.pullMenu},
 			}
 		case r.root != "":
-			return []action{{"p", "pull all", Model.askPullAll}}
+			return []action{{"P", "push all", Model.askPushAll}, {"p", "pull all", Model.askPullAll}}
 		case e.dir:
 			return []action{{"a", "add", Model.add}}
 		}
@@ -56,7 +54,7 @@ func (m Model) selectionActions() []action {
 	case m.focus == log:
 		return []action{{"r", "restore this snapshot", Model.askRestore}}
 	case r.folder == nil && r.root != "":
-		return []action{{"p", "pull all", Model.askPullAll}}
+		return []action{{"P", "push all", Model.askPushAll}, {"p", "pull all", Model.askPullAll}}
 	case r.folder == nil:
 		return nil
 	case r.folder.Dir == "":
@@ -68,11 +66,6 @@ func (m Model) selectionActions() []action {
 		{"p", "pull", Model.pullMenu},
 		{"r", "restore", Model.chooseRestore},
 	}
-}
-
-// brief names a snapshot in a few words, for the bottom line.
-func brief(s restic.Snapshot) string {
-	return fmt.Sprintf("%s (%s, %s)", s.ID[:8], s.Host, app.Age(time.Since(s.Time)))
 }
 
 // doneMsg is how a finished action reports back.
@@ -110,11 +103,7 @@ func (m Model) push() (tea.Model, tea.Cmd) {
 		if err != nil {
 			return "", err
 		}
-		state := "now"
-		if res.Already {
-			state = "already"
-		}
-		return fmt.Sprintf("%s: master is %s %s", f, state, brief(res.Snapshot)), nil
+		return res.Line(f), nil
 	})
 }
 
@@ -239,20 +228,10 @@ func absolute(path string) (string, error) {
 // pull brings the target into a folder that is here, and says how it went.
 func pull(ctx context.Context, back backend, f db.Folder, from string) (string, error) {
 	res, err := back.Pull(ctx, f, from)
-	saved := ""
-	if res.Saved != "" {
-		saved = "; state before saved as " + res.Saved[:8]
-	}
 	if err != nil {
 		return "", err
 	}
-	switch res.Outcome {
-	case app.AlreadyThere:
-		return fmt.Sprintf("%s: already at %s", f, brief(res.Target)), nil
-	case app.AheadOfTarget:
-		return fmt.Sprintf("%s: nothing to pull, this client is ahead of %s", f, brief(res.Target)), nil
-	}
-	return fmt.Sprintf("pulled %s: %s%s", f, brief(res.Target), saved), nil
+	return res.Line(f), nil
 }
 
 // fetch brings a folder that is not here into its root's directory.
@@ -265,7 +244,16 @@ func fetch(ctx context.Context, back backend, f db.Folder, rootDir, from string)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("pulled %s into %s: %s", f, res.Dir, brief(res.Target)), nil
+	return res.Line(f), nil
+}
+
+// all says how a pull or push of many folders went: the summary, and the
+// failures as the error.
+func all(res app.AllResult, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
+	return res.Summary(), failures(res.Failed, res.Done+len(res.Failed))
 }
 
 // askPullAll confirms pulling master into every folder of the selected
@@ -301,22 +289,11 @@ func (m Model) askPullAll() (tea.Model, tea.Cmd) {
 			done: func(m Model, _ string) (tea.Model, tea.Cmd) {
 				busy := fmt.Sprintf("pulling %d folders under %s", total, root)
 				return m.start(busy, "pull all of "+root, func(ctx context.Context) (string, error) {
-					var failed []string
-					for _, f := range behind {
-						if _, err := pull(ctx, m.back, f.Folder, ""); err != nil {
-							failed = append(failed, f.Folder.String()+": "+err.Error())
-						}
+					scope := app.Scope{Root: root}
+					if _, known := m.back.RootDir(root); !known {
+						scope.NewRoot, scope.NewRootDir = root, rootDir
 					}
-					for _, f := range missing {
-						if _, err := fetch(ctx, m.back, f.Folder, rootDir, ""); err != nil {
-							failed = append(failed, f.Folder.String()+": "+err.Error())
-						}
-					}
-					note := fmt.Sprintf("pulled %d of %d folders under %s", total-len(failed), total, root)
-					if len(failed) > 0 {
-						return note, fmt.Errorf("%d of %d folders failed.\n\n%s", len(failed), total, strings.Join(failed, "\n\n"))
-					}
-					return note, nil
+					return all(m.back.PullAll(ctx, scope))
 				})
 			},
 		}
@@ -326,6 +303,51 @@ func (m Model) askPullAll() (tea.Model, tea.Cmd) {
 		return confirm(m, "")
 	}
 	return m.withRoot(root, confirm)
+}
+
+// askPushAll confirms pushing every folder of the selected root that has
+// a snapshot master does not.
+func (m Model) askPushAll() (tea.Model, tea.Cmd) {
+	root := m.selected().root
+	var ahead, changed int
+	for _, f := range m.under(root) {
+		switch f.Status {
+		case app.Ahead, app.Diverged:
+			ahead++
+		case app.Changed:
+			changed++
+		}
+	}
+	if ahead+changed == 0 {
+		m.dialog = message("Push all of "+root, "Nothing to push: no folder under it has a snapshot master does not.")
+		return m, nil
+	}
+	var parts []string
+	if ahead > 0 {
+		parts = append(parts, fmt.Sprintf("Makes the latest snapshot of %s master.", plural(ahead, "folder")))
+	}
+	if changed > 0 {
+		parts = append(parts, fmt.Sprintf("%s changed since the latest snapshot, and fail until that is snapshotted.", plural(changed, "folder")))
+	}
+	text := strings.Join(parts, " ")
+	m.dialog = &dialog{
+		title:   "Push all of " + root + "?",
+		text:    text,
+		confirm: true,
+		done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+			return m.start("pushing the folders under "+root, "push all of "+root, func(ctx context.Context) (string, error) {
+				return all(m.back.PushAll(ctx, app.Scope{Root: root}))
+			})
+		},
+	}
+	return m, nil
+}
+
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
 }
 
 // chooseRestore moves into the log, where a snapshot is picked.
@@ -362,7 +384,7 @@ func (m Model) askRestore() (tea.Model, tea.Cmd) {
 					return "", err
 				}
 				if res.Already {
-					return fmt.Sprintf("%s: already at %s", name, brief(res.Target)), nil
+					return fmt.Sprintf("%s: already at %s", name, app.Brief(res.Target)), nil
 				}
 				note := fmt.Sprintf("restored %s to %s", name, res.Target.ID[:8])
 				if res.Undo != "" {

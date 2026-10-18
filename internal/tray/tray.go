@@ -1,6 +1,7 @@
 // Package tray shows the watcher's status as an icon in the desktop's tray
 // (StatusNotifierItem over D-Bus). A left click runs a command, by default
-// one that opens the TUI in a terminal.
+// one that opens the TUI in a terminal; a right click opens a menu of what
+// the watcher can be asked to do.
 package tray
 
 import (
@@ -20,19 +21,34 @@ import (
 // nothing; a tray that appears later picks it up.
 type Tray struct {
 	open string
+	ask  func(watch.Action)
 	log  *log.Logger
 
-	mu    sync.Mutex
-	icons map[watch.State][]byte
+	mu     sync.Mutex
+	icons  map[watch.State][]byte
+	items  []*systray.MenuItem // the menu's actions, once it is made
+	acting bool                // as last shown: an action runs
 }
 
-// Start shows the icon until ctx ends. Open is run by sh on a left click.
-func Start(ctx context.Context, open string, l *log.Logger) *Tray {
-	t := &Tray{open: open, log: l, icons: map[watch.State][]byte{}}
+// actions are the menu's items, in order.
+var actions = []struct {
+	action  watch.Action
+	title   string
+	tooltip string
+}{
+	{watch.PullAll, "Pull all", "Bring master into every folder behind it, and into those not here yet"},
+	{watch.PushAll, "Push all", "Make the latest snapshot of every folder that has one master"},
+}
+
+// Start shows the icon until ctx ends. Open is run by sh on a left click;
+// ask is given what is picked from the menu.
+func Start(ctx context.Context, open string, ask func(watch.Action), l *log.Logger) *Tray {
+	t := &Tray{open: open, ask: ask, log: l, icons: map[watch.State][]byte{}}
 	t.Show(watch.Status{State: watch.UpToDate, Detail: "starting"})
 	start, end := systray.RunWithExternalLoop(func() {
 		systray.SetTitle("wipsync")
 		systray.SetOnTapped(t.click)
+		t.menu()
 	}, nil)
 	start()
 	go func() {
@@ -50,9 +66,40 @@ func (t *Tray) Show(st watch.Status) {
 		png = icon(colours[st.State])
 		t.icons[st.State] = png
 	}
+	t.acting = st.Acting
 	t.mu.Unlock()
 	systray.SetIcon(png)
 	systray.SetTooltip(Tooltip(st))
+	t.enable()
+}
+
+// menu makes the menu's items and passes on what is clicked.
+func (t *Tray) menu() {
+	t.mu.Lock()
+	for _, a := range actions {
+		item := systray.AddMenuItem(a.title, a.tooltip)
+		t.items = append(t.items, item)
+		go func() {
+			for range item.ClickedCh {
+				t.ask(a.action)
+			}
+		}()
+	}
+	t.mu.Unlock()
+	t.enable()
+}
+
+// enable greys the menu out while an action runs.
+func (t *Tray) enable() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, item := range t.items {
+		if t.acting {
+			item.Disable()
+		} else {
+			item.Enable()
+		}
+	}
 }
 
 // Tooltip is the status as text: the state, then the recent events.
