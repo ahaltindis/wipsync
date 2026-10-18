@@ -7,7 +7,7 @@ Status: `init`, `add`, `list`, `snapshot`, `push`, `pull`, `restore`, `log`, `wa
 work. Pull does not merge yet: when both sides changed it stops, and `restore` takes one side as it
 is. `diff` is not built yet. `wipsync tui` does the same from one screen, and
 adds folders from a directory browser. `wipsync watch`, run by a user service, snapshots folders
-as they change.
+as they change, and shows its state as a tray icon.
 
 ## Model
 
@@ -101,9 +101,20 @@ on a root, everything under it), `r` restore. Pull and restore ask first. Space 
 - **State**: `~/.local/state/wipsync/` holds, per folder, the snapshot it is based on, the master it
   last saw, and its fingerprint. Not inside the
   folder, where a pull would overwrite it.
+- **Tray**: `wipsync watch` shows an icon in the desktop's tray (StatusNotifierItem over D-Bus,
+  `fyne.io/systray`), so any bar with a tray shows it, not only waybar. One symbol, a W whose tips
+  run on into two arrows round a circle, coloured by state; when several apply, the first wins: red server unreachable, yellow snapshotting, purple
+  behind (master moved past a folder here, or another client has newer work, as of the last
+  check), blue up to date. The tooltip is the state and the last 10 things the watcher logged, with
+  their times. A left click runs `[tray] open`, by default
+  `systemd-run --user --collect xdg-terminal-exec wipsync tui`: the service's unit stops everything
+  in it with it (`KillMode=mixed`), so what the click opens must run outside it. `[tray] hide = true`
+  shows no icon; that is also where a bar-specific output would go. Without a session bus or a
+  tray it does nothing, and registers when a tray appears. The tray settings are read at start.
 - **Log**: what was sent and when, per folder.
 - **Ignore rules** per folder with defaults (`node_modules`, virtualenvs, `__pycache__`).
-- Later: waybar indicator, vicinae command.
+- Later: vicinae command; a right-click menu on the tray icon (pull all, push all, ...). Until
+  then a right click opens an empty menu.
 
 ## Engine
 
@@ -167,6 +178,20 @@ Still to verify:
 3. Changing an ignore rule after snapshots exist.
 
 Fallback: rsync over ssh with hard-link snapshots on the server.
+
+### Tray spike (2026-10-18)
+
+`fyne.io/systray` 1.12.2, run as a transient user service on Hyprland with waybar's tray.
+
+| Checked | Result |
+|---|---|
+| Registers with the tray from a user service | yes |
+| Registers again after waybar restarts | yes, the library follows the watcher's name on the bus |
+| Icon and tooltip change while running | yes |
+| Tooltip with several lines | yes, all shown |
+| Left click reaches our code | yes; with a click handler the item is not a menu |
+| Right click | an empty menu |
+| What a click opens outlives the service | yes, with `systemd-run --user` |
 
 ## Packaging
 

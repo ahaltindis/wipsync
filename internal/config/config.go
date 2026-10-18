@@ -27,6 +27,9 @@ type Config struct {
 	// Open is what the TUI opens a directory with.
 	Open Open `toml:"open,omitempty"`
 
+	// Tray is the icon the service shows.
+	Tray Tray `toml:"tray,omitempty"`
+
 	// Roots maps a root name to its location on this client. It is the only
 	// part of the config that differs between clients.
 	Roots   map[string]string `toml:"roots"`
@@ -48,6 +51,13 @@ func (f Folder) String() string { return f.Root + "/" + f.Path }
 type Open struct {
 	Window string `toml:"window,omitempty"` // O: on its own, beside the TUI
 	Here   string `toml:"here,omitempty"`   // o: in the TUI's terminal, until it exits
+}
+
+// Tray is the icon `wipsync watch` shows in the desktop's tray. Changes take
+// effect when the service restarts.
+type Tray struct {
+	Hide bool   `toml:"hide,omitempty"` // show no icon
+	Open string `toml:"open,omitempty"` // run by sh on a left click; it opens the TUI when empty
 }
 
 // The commands used when the config names none.

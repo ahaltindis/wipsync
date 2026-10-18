@@ -49,6 +49,8 @@ type Watcher struct {
 	// Notify shows news on the desktop; when it is nil or fails, the news
 	// is only logged.
 	Notify func(ctx context.Context, title, body string, urgent bool) error
+	// Show is given the status whenever it changes; it may be nil.
+	Show func(Status)
 
 	back     Backend
 	opened   time.Time
@@ -64,6 +66,11 @@ type Watcher struct {
 	told      map[string]time.Time // news told, by key, and when
 	known     map[string]bool      // folders not on this client, as of the last check
 	notifyErr string
+
+	recent   []Event  // newest first, at most Recent
+	snapping string   // the folder being snapshotted, if any
+	behind   []string // the folders with something to take, as of the last check
+	shown    *Status
 }
 
 // folder is what the watcher remembers of one folder.
@@ -90,6 +97,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 // Round does what is due at now.
 func (w *Watcher) Round(ctx context.Context, now time.Time) {
+	defer w.show()
 	w.reopen(now)
 	if w.back == nil {
 		return
@@ -123,12 +131,13 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 	world, err := w.back.Survey(ctx)
 	if err != nil {
 		if ctx.Err() == nil && err.Error() != w.checkErr {
-			w.Log.Printf("cannot read the repository: %v", err)
+			w.say(now, "cannot read the repository: %v", err)
 			w.checkErr = err.Error()
 		}
 		return
 	}
 	w.checkErr = ""
+	w.behind = behind(world, w.back.ClientName())
 	if w.told == nil {
 		w.told = map[string]time.Time{}
 	}
@@ -154,7 +163,7 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 		return
 	}
 	for _, l := range lines {
-		w.Log.Print(l)
+		w.say(now, "%s", l)
 	}
 	title := "wipsync: 1 update"
 	if len(lines) > 1 {
@@ -165,7 +174,7 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 	}
 	if err := w.Notify(ctx, title, strings.Join(lines, "\n"), urgent); err != nil {
 		if err.Error() != w.notifyErr {
-			w.Log.Printf("cannot notify: %v", err)
+			w.say(now, "cannot notify: %v", err)
 			w.notifyErr = err.Error()
 		}
 	} else {
@@ -182,7 +191,7 @@ func (w *Watcher) reopen(now time.Time) {
 	if err != nil {
 		// The last good config goes on being used.
 		if err.Error() != w.openErr {
-			w.Log.Printf("cannot read the config: %v", err)
+			w.say(now, "cannot read the config: %v", err)
 			w.openErr = err.Error()
 		}
 		return
@@ -190,9 +199,9 @@ func (w *Watcher) reopen(now time.Time) {
 	w.openErr = ""
 	if w.back == nil {
 		if n := len(back.Here()); n == 1 {
-			w.Log.Printf("watching 1 folder")
+			w.say(now, "watching 1 folder")
 		} else {
-			w.Log.Printf("watching %d folders", n)
+			w.say(now, "watching %d folders", n)
 		}
 	}
 	w.back = back
@@ -216,7 +225,7 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *
 	print, changed, err := w.back.Look(ctx, f)
 	switch {
 	case err != nil:
-		w.fail(f, st, err)
+		w.fail(now, f, st, err)
 		st.due = now.Add(Poll)
 		return
 	case !changed:
@@ -238,7 +247,10 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *
 		return
 	}
 
+	w.snapping = f.String()
+	w.show()
 	res, err := w.back.Snapshot(ctx, f)
+	w.snapping = ""
 	switch {
 	case errors.Is(err, state.ErrBusy):
 		// Another wipsync has it: look again soon.
@@ -252,11 +264,11 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *
 			st.due = w.nextPing
 			return
 		}
-		w.fail(f, st, err)
+		w.fail(now, f, st, err)
 		st.due = now.Add(Poll)
 	default:
 		if res.SnapshotID != "" {
-			w.Log.Printf("%s: snapshot %s, %d new, %d changed, %s stored",
+			w.say(now, "%s: snapshot %s, %d new, %d changed, %s stored",
 				f, res.SnapshotID[:8], res.FilesNew, res.FilesChanged, app.FormatBytes(res.BytesStored))
 		}
 		st.since, st.seen, st.failed, st.due = time.Time{}, "", "", now.Add(Poll)
@@ -264,9 +276,9 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *
 }
 
 // fail logs a folder's failure, once until it changes or the folder recovers.
-func (w *Watcher) fail(f config.Folder, st *folder, err error) {
+func (w *Watcher) fail(now time.Time, f config.Folder, st *folder, err error) {
 	if err.Error() != st.failed {
-		w.Log.Printf("%s: %v", f, err)
+		w.say(now, "%s: %v", f, err)
 		st.failed = err.Error()
 	}
 }
@@ -284,7 +296,7 @@ func (w *Watcher) online(ctx context.Context, now time.Time) bool {
 	w.lastPing = now
 	if err == nil {
 		if w.offline {
-			w.Log.Printf("the server is reachable again")
+			w.say(now, "the server is reachable again")
 		}
 		w.offline, w.retry = false, 0
 		return true
@@ -299,7 +311,7 @@ func (w *Watcher) online(ctx context.Context, now time.Time) bool {
 		w.retry = min(2*w.retry, MaxRetry)
 	}
 	w.offline, w.nextPing = true, now.Add(w.retry)
-	w.Log.Printf("the server is unreachable, trying again in %s: %v", durationText(w.retry), err)
+	w.say(now, "the server is unreachable, trying again in %s: %v", durationText(w.retry), err)
 	return false
 }
 

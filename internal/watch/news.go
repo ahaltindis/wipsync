@@ -46,18 +46,23 @@ func news(w app.World, client string, known map[string]bool) []item {
 			out = append(out, item{key: "master " + name + " " + f.Master, urgent: true,
 				line: fmt.Sprintf("%s: master moved to %s (%s), and this folder changed too", name, short(f.Master), master.Host)})
 		}
-		// Newer work on another client: its snapshot is the latest of all,
-		// and is neither master nor what this folder is based on.
-		if len(f.Snapshots) > 0 {
-			s := f.Snapshots[0]
-			if s.Host != client && s.ID != f.Master && s.ID != f.Base {
-				out = append(out, item{key: "wip " + name,
-					line: fmt.Sprintf("%s: newer work on %s (%s, %s)", name, s.Host, short(s.ID),
-						app.Age(time.Since(s.Time)))})
-			}
+		if s, ok := newerWork(f, client); ok {
+			out = append(out, item{key: "wip " + name,
+				line: fmt.Sprintf("%s: newer work on %s (%s, %s)", name, s.Host, short(s.ID),
+					app.Age(time.Since(s.Time)))})
 		}
 	}
 	return out
+}
+
+// newerWork returns another client's snapshot of a folder when it is the
+// latest of all, and is neither master nor what this folder is based on.
+func newerWork(f app.FolderState, client string) (restic.Snapshot, bool) {
+	if len(f.Snapshots) == 0 {
+		return restic.Snapshot{}, false
+	}
+	s := f.Snapshots[0]
+	return s, s.Host != client && s.ID != f.Master && s.ID != f.Base
 }
 
 func find(list []restic.Snapshot, id string) restic.Snapshot {

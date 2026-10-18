@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/app"
+	"github.com/ahaltindis/wipsync/internal/tray"
 	"github.com/ahaltindis/wipsync/internal/watch"
 )
 
@@ -29,6 +30,12 @@ another client, a folder added on another client. Each is told once while
 it runs; newer work at most once an hour. It never pulls or pushes.
 Folders added to the config are picked up without a restart.
 
+It shows an icon in the desktop's tray, coloured by what it is doing: blue
+up to date, purple behind (master moved, or newer work on another client),
+yellow snapshotting, red server unreachable. Its tooltip lists the last
+things it did; a left click opens the TUI in a terminal. The config's
+[tray] section hides it (hide = true) or sets what a click runs (open).
+
 This is what the wipsync user service runs:
 
   systemctl --user enable --now wipsync`,
@@ -39,7 +46,8 @@ This is what the wipsync user service runs:
 				return err
 			}
 			// Read once now, so that a broken config stops it at the start.
-			if _, err := app.Open(path); err != nil {
+			a, err := app.Open(path)
+			if err != nil {
 				return err
 			}
 			flags := log.LstdFlags
@@ -58,6 +66,17 @@ This is what the wipsync user service runs:
 				},
 				Log:    log.New(cmd.ErrOrStderr(), "", flags),
 				Notify: watch.Desktop,
+			}
+			if cfg := a.Config.Tray; !cfg.Hide {
+				open := cfg.Open
+				if open == "" {
+					binary, err := os.Executable()
+					if err != nil {
+						return err
+					}
+					open = tray.DefaultOpen(binary, a.ConfigPath)
+				}
+				w.Show = tray.Start(cmd.Context(), open, w.Log).Show
 			}
 			return w.Run(cmd.Context())
 		},

@@ -21,6 +21,16 @@ journalctl --user -u wipsync -f   # what it does
 The service runs without a terminal, so ssh must reach the server without asking anything: a key
 without a passphrase, or an agent the user session already has.
 
+The service shows an icon in the desktop's tray: blue up to date, purple behind, yellow
+snapshotting, red server unreachable. Hovering lists what it did last; a left click opens
+`wipsync tui` in a terminal. To change the click or hide the icon, in the config:
+
+```toml
+[tray]
+open = "systemd-run --user --collect footclient wipsync tui"  # start it outside the service
+hide = true
+```
+
 The server needs nothing installed beyond ssh, `sh` and `flock`.
 
 ## Development
