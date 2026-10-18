@@ -112,6 +112,7 @@ type Watcher struct {
 	acting   Action  // the action running, while isActing
 	isActing bool
 	behind   []string // the folders with something to take, as of the last check
+	ahead    []string // the folders with something to push, as of the last check or since
 	shown    *Status
 }
 
@@ -185,6 +186,7 @@ func (w *Watcher) check(ctx context.Context, now time.Time) {
 	}
 	w.checkErr = ""
 	w.behind = behind(world, w.back.ClientName())
+	w.ahead = ahead(world)
 	if w.told == nil {
 		w.told = map[string]time.Time{}
 	}
@@ -326,6 +328,8 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f db.Folder, st *fold
 		st.since, st.seen, st.due = time.Time{}, "", now.Add(Poll)
 		return
 	}
+	// Changed: until it is pushed, there is something to push.
+	w.toPush(f)
 	first := st.since.IsZero()
 	if first {
 		st.since = now

@@ -122,9 +122,11 @@ Compared per file against the common base snapshot:
   ignored and can be removed.
 - **Tray**: `wipsync watch` shows an icon in the desktop's tray (StatusNotifierItem over D-Bus,
   `fyne.io/systray`), so any bar with a tray shows it, not only waybar. One symbol, a W whose tips
-  run on into two arrows round a circle, coloured by state; when several apply, the first wins: red server unreachable, yellow snapshotting, purple
-  behind (master moved past a folder here, or another client has newer work, as of the last
-  check), blue up to date. The tooltip is the state and the last 10 things the watcher logged, with
+  run on into two arrows round a circle, coloured by state, so that a glance says whether anything is to be done; when several
+  apply, the first wins: red server unreachable, yellow snapshotting or an action running, purple
+  a pull is due (master moved past a folder here, or another client has newer work, as of the
+  last check), blue a push is due (a folder has snapshots master does not as of the last check,
+  or changed since), light grey (`#d0d0d0`, the bar's own colour) nothing to do. The tooltip is the state and the last 10 things the watcher logged, with
   their times. A right click opens a menu with Pull all and Push all, greyed out while one runs;
   the service runs it between its rounds, logs a line per folder, tells the summary on the
   desktop (urgent when a folder failed), and reads the repository again at once. A left click

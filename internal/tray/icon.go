@@ -12,7 +12,8 @@ import (
 
 // Colours of the icon, by state, for a dark bar.
 var colours = map[watch.State]color.NRGBA{
-	watch.UpToDate:     {0x17, 0x93, 0xd1, 0xff}, // blue
+	watch.UpToDate:     {0xd0, 0xd0, 0xd0, 0xff}, // light grey, like the bar's other icons
+	watch.Ahead:        {0x17, 0x93, 0xd1, 0xff}, // blue
 	watch.Behind:       {0xc6, 0x78, 0xdd, 0xff}, // purple
 	watch.Snapshotting: {0xe5, 0xc0, 0x7b, 0xff}, // yellow
 	watch.Offline:      {0xe0, 0x6c, 0x75, 0xff}, // red
