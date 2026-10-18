@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -23,7 +23,7 @@ const (
 
 // FolderState is everything known about one folder.
 type FolderState struct {
-	Folder config.Folder
+	Folder db.Folder
 	Dir    string // where it is on this client; "" if it is not
 
 	Snapshots []restic.Snapshot // from all clients, newest first
@@ -65,10 +65,10 @@ func (a *App) Survey(ctx context.Context) (World, error) {
 	w.MasterErr = masterErr
 
 	states := map[string]*FolderState{}
-	state := func(f config.Folder) *FolderState {
+	state := func(f db.Folder) *FolderState {
 		name := f.String()
 		if states[name] == nil {
-			states[name] = &FolderState{Folder: config.Folder{Root: f.Root, Path: f.Path}, Status: NotHere}
+			states[name] = &FolderState{Folder: db.Folder{Root: f.Root, Path: f.Path}, Status: NotHere}
 		}
 		return states[name]
 	}
@@ -78,10 +78,10 @@ func (a *App) Survey(ctx context.Context) (World, error) {
 			st.Snapshots = append(st.Snapshots, s)
 		}
 	}
-	for _, f := range a.Config.Folders {
+	for _, f := range a.Data.Folders {
 		st := state(f)
-		st.Folder, st.Dir = f, a.Config.Dir(f)
-		if st.Base, err = a.State.Base(f.Root, f.Path); err != nil {
+		st.Folder, st.Dir = f, a.Data.Dir(f)
+		if st.Base, err = a.DB.Base(f.Root, f.Path); err != nil {
 			return w, err
 		}
 		// A folder that cannot be looked at counts as changed.

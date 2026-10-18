@@ -19,20 +19,20 @@ func TestInit(t *testing.T) {
 	needRestic(t)
 	e := newEnv(t)
 	base := filepath.Dir(e.cfg)
-	repo, pass := filepath.Join(base, "repo"), filepath.Join(base, "password")
+	repo, pass := filepath.Join(base, "repo"), filepath.Join(base, "data", "wipsync", "password")
 
 	// File method; the first pair of passwords differs; then create the repository.
 	out, err := e.run("1\nsecret\nsecrte\nsecret\nsecret\n"+repo+"\ny\n", "init")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{"The two passwords differ.", "Created the repository at " + repo, "Saved " + e.cfg} {
+	for _, want := range []string{"The two passwords differ.", "Created the repository at " + repo, "Saved in " + filepath.Join(base, "data", "wipsync", "wipsync.db")} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	c := e.config()
-	if c.Repository != repo || c.PasswordFile != "password" || c.PasswordFilePath() != pass || c.PasswordCommand != "" {
+	c := e.data()
+	if c.Repository != repo || c.PasswordFile != pass || c.PasswordCommand != "" {
 		t.Errorf("config = %+v", c)
 	}
 	data, err := os.ReadFile(pass)
@@ -67,7 +67,7 @@ func TestInitExistingRepository(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "this password does not open it") {
 		t.Errorf("err = %v\n%s", err, out)
 	}
-	if got := second.config().Repository; got != "" {
+	if got := second.data().Repository; got != "" {
 		t.Errorf("config was saved with repository %q", got)
 	}
 
@@ -79,7 +79,7 @@ func TestInitExistingRepository(t *testing.T) {
 	if !strings.Contains(out, "Found the repository") || strings.Contains(out, "Create it?") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
-	if got := second.config().Repository; got != repo {
+	if got := second.data().Repository; got != repo {
 		t.Errorf("repository = %q", got)
 	}
 }
@@ -97,11 +97,11 @@ func TestInitPasswordCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	c := e.config()
+	c := e.data()
 	if c.PasswordCommand != "cat "+secret || c.PasswordFile != "" || c.Repository != repo {
 		t.Errorf("config = %+v", c)
 	}
-	if _, err := os.Stat(filepath.Join(base, "password")); err == nil {
+	if _, err := os.Stat(filepath.Join(base, "data", "wipsync", "password")); err == nil {
 		t.Error("a password file was written for the command method")
 	}
 	if out, err := e.run("", "doctor"); err != nil {
@@ -120,7 +120,7 @@ func TestInitDeclineCreate(t *testing.T) {
 	if _, err := os.Stat(repo); err == nil {
 		t.Error("the repository was created anyway")
 	}
-	if got := e.config().Repository; got != "" {
+	if got := e.data().Repository; got != "" {
 		t.Errorf("config was saved with repository %q", got)
 	}
 }
@@ -163,7 +163,7 @@ func TestNormalizeRepository(t *testing.T) {
 }
 
 // The config was given as a relative path, and later commands run from
-// another directory.
+// another directory: the password file is still found.
 func TestInitRelativeConfig(t *testing.T) {
 	needRestic(t)
 	e := newEnv(t)
@@ -176,16 +176,17 @@ func TestInitRelativeConfig(t *testing.T) {
 	if out, err := e.run("1\nsecret\nsecret\n"+repo+"\n\n", "init"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(base, "conf", "password")); err != nil {
-		t.Errorf("password file is not beside the config: %v", err)
+	pass := filepath.Join(base, "data", "wipsync", "password")
+	if _, err := os.Stat(pass); err != nil {
+		t.Errorf("password file is not beside the database: %v", err)
 	}
 
 	dir := e.mkdir("Projects/app")
 	e.write("Projects/app/a.txt", "one\n")
 	t.Chdir(e.home)
 	e.cfg = abs
-	if got := e.config().PasswordFile; got != "password" {
-		t.Errorf("password_file = %q, want it relative to the config", got)
+	if got := e.data().PasswordFile; got != pass {
+		t.Errorf("password file = %q, want %q", got, pass)
 	}
 	if out, err := e.run("", "doctor"); err != nil {
 		t.Errorf("doctor from another directory: %v\n%s", err, out)

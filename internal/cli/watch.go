@@ -28,7 +28,7 @@ Every 5 minutes it reads the repository, and tells on the desktop (through
 notify-send) and in its log what is new: master moved, newer work on
 another client, a folder added on another client. Each is told once while
 it runs; newer work at most once an hour. It never pulls or pushes.
-Folders added to the config are picked up without a restart.
+Folders added by add or pull are picked up without a restart.
 
 It shows an icon in the desktop's tray, coloured by what it is doing: blue
 up to date, purple behind (master moved, or newer work on another client),
@@ -66,6 +66,9 @@ This is what the wipsync user service runs:
 				},
 				Log:    log.New(cmd.ErrOrStderr(), "", flags),
 				Notify: watch.Desktop,
+			}
+			for _, note := range a.Notes {
+				w.Log.Print(note)
 			}
 			if cfg := a.Config.Tray; !cfg.Hide {
 				open := cfg.Open

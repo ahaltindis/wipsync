@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -11,73 +12,66 @@ func TestLoadMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Client == "" {
-		t.Error("client should default to the hostname")
-	}
-	if len(c.Folders) != 0 || len(c.Roots) != 0 {
+	if !reflect.DeepEqual(c.Old, Old{}) || c.Tray != (Tray{}) || c.Open != (Open{}) {
 		t.Errorf("expected an empty config, got %+v", c)
 	}
 }
 
-func TestSaveLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "config.toml")
-	want := &Config{
-		Path:            path,
-		Client:          "laptop",
-		Repository:      "sftp:user@host:/repo",
-		PasswordCommand: "secret-tool lookup service wipsync",
-		Roots:           map[string]string{"Projects": "/home/u/Projects"},
-		Folders: []Folder{
-			{Root: "Projects", Path: "Freelance/kadir/boxing-machine", Ignore: []string{".venv"}},
-		},
-	}
-	if err := want.Save(path); err != nil {
+func TestLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[tray]
+open = "footclient wipsync tui"
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(path)
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got  %+v\nwant %+v", got, want)
+	if c.Tray.Open != "footclient wipsync tui" {
+		t.Errorf("tray open = %q", c.Tray.Open)
+	}
+	if len(c.Old.Keys) != 0 {
+		t.Errorf("old keys %v in a config without any", c.Old.Keys)
 	}
 }
 
-func TestDirAndFolderAt(t *testing.T) {
-	c := &Config{
-		Roots:   map[string]string{"Projects": "/home/u/Projects"},
-		Folders: []Folder{{Root: "Projects", Path: "Freelance/kadir/boxing-machine"}},
+func TestLoadOld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`
+client = "laptop"
+repository = "sftp:user@host:/repo"
+password_file = "password"
+
+[roots]
+Projects = "/home/u/Projects"
+
+[[folder]]
+root = "Projects"
+path = "Freelance/kadir/boxing-machine"
+ignore = [".venv"]
+`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	dir := "/home/u/Projects/Freelance/kadir/boxing-machine"
-	if got := c.Dir(c.Folders[0]); got != dir {
-		t.Errorf("Dir = %q, want %q", got, dir)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := c.FolderAt(dir); !ok {
-		t.Error("FolderAt did not find the folder")
+	want := Old{
+		Client:       "laptop",
+		Repository:   "sftp:user@host:/repo",
+		PasswordFile: "password",
+		Roots:        map[string]string{"Projects": "/home/u/Projects"},
+		Folders:      []OldFolder{{Root: "Projects", Path: "Freelance/kadir/boxing-machine", Ignore: []string{".venv"}}},
+		Keys:         []string{"client", "repository", "password_file", "roots", "folder"},
 	}
-	if _, ok := c.FolderAt("/home/u/Projects/Freelance"); ok {
-		t.Error("FolderAt matched a parent directory")
+	if !reflect.DeepEqual(c.Old, want) {
+		t.Errorf("got  %+v\nwant %+v", c.Old, want)
 	}
 }
 
-func TestFolderContaining(t *testing.T) {
-	c := &Config{
-		Roots:   map[string]string{"Projects": "/home/u/Projects"},
-		Folders: []Folder{{Root: "Projects", Path: "app"}},
-	}
-	for _, dir := range []string{"/home/u/Projects/app", "/home/u/Projects/app/src/deep"} {
-		if f, ok := c.FolderContaining(dir); !ok || f.Path != "app" {
-			t.Errorf("FolderContaining(%q) = %+v, %v", dir, f, ok)
-		}
-	}
-	for _, dir := range []string{"/home/u/Projects", "/home/u/Projects/app2"} {
-		if _, ok := c.FolderContaining(dir); ok {
-			t.Errorf("FolderContaining(%q) matched", dir)
-		}
-	}
-}
-
-func TestPasswordFilePath(t *testing.T) {
+func TestOldPasswordFile(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
 	cases := map[string]string{
 		"~/.config/wipsync/password": "/home/u/.config/wipsync/password",
@@ -87,47 +81,9 @@ func TestPasswordFilePath(t *testing.T) {
 		"":                           "",
 	}
 	for in, want := range cases {
-		if got := (&Config{Path: "/conf/dir/config.toml", PasswordFile: in}).PasswordFilePath(); got != want {
-			t.Errorf("PasswordFilePath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestRootAbovePicksDeepest(t *testing.T) {
-	c := &Config{Roots: map[string]string{
-		"Projects":  "/home/u/Projects",
-		"Freelance": "/home/u/Projects/Freelance",
-		"Other":     "/home/u/Other",
-	}}
-	if name, ok := c.RootAbove("/home/u/Projects/Freelance/kadir"); !ok || name != "Freelance" {
-		t.Errorf("got %q %v, want Freelance", name, ok)
-	}
-	if name, ok := c.RootAbove("/home/u/Projects/x"); !ok || name != "Projects" {
-		t.Errorf("got %q %v, want Projects", name, ok)
-	}
-	if _, ok := c.RootAbove("/home/u/Projects"); ok {
-		t.Error("a root is not above itself")
-	}
-	if _, ok := c.RootAbove("/home/u/ProjectsX/y"); ok {
-		t.Error("matched a directory that only shares a name prefix")
-	}
-}
-
-func TestWithin(t *testing.T) {
-	cases := []struct {
-		parent, dir, rel string
-		ok               bool
-	}{
-		{"/a", "/a/b/c", "b/c", true},
-		{"/a", "/a", "", false},
-		{"/a/b", "/a", "", false},
-		{"/a", "/ab", "", false},
-		{"/a", "/a/..b", "..b", true},
-	}
-	for _, tc := range cases {
-		rel, ok := Within(tc.parent, tc.dir)
-		if rel != tc.rel || ok != tc.ok {
-			t.Errorf("Within(%q, %q) = %q, %v; want %q, %v", tc.parent, tc.dir, rel, ok, tc.rel, tc.ok)
+		c := &Config{Path: "/conf/dir/config.toml", Old: Old{PasswordFile: in}}
+		if got := c.OldPasswordFile(); got != want {
+			t.Errorf("OldPasswordFile(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -237,7 +237,7 @@ func absolute(path string) (string, error) {
 }
 
 // pull brings the target into a folder that is here, and says how it went.
-func pull(ctx context.Context, back backend, f config.Folder, from string) (string, error) {
+func pull(ctx context.Context, back backend, f db.Folder, from string) (string, error) {
 	res, err := back.Pull(ctx, f, from)
 	saved := ""
 	if res.Saved != "" {
@@ -256,7 +256,7 @@ func pull(ctx context.Context, back backend, f config.Folder, from string) (stri
 }
 
 // fetch brings a folder that is not here into its root's directory.
-func fetch(ctx context.Context, back backend, f config.Folder, rootDir, from string) (string, error) {
+func fetch(ctx context.Context, back backend, f db.Folder, rootDir, from string) (string, error) {
 	target, err := back.FindTarget(ctx, f, from)
 	if err != nil {
 		return "", err

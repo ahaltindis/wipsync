@@ -11,6 +11,10 @@ wipsync init      # once per machine: the repository password and location
 wipsync doctor    # check the setup
 ```
 
+What wipsync keeps (the repository, the folders, what it last saw of each) is in
+`~/.local/share/wipsync/wipsync.db`, with the repository password beside it. `~/.config/wipsync/config.toml`
+is only for your settings, and wipsync never writes it.
+
 To snapshot folders automatically as they change:
 
 ```sh
@@ -43,10 +47,10 @@ go test ./...                       # test
 go vet ./... && gofmt -l .          # check
 ```
 
-To try it without touching your real config and state:
+To try it without touching your real config, database and state:
 
 ```sh
-export XDG_STATE_HOME=/tmp/try-state
+export XDG_DATA_HOME=/tmp/try-data XDG_STATE_HOME=/tmp/try-state
 ./wipsync --config /tmp/try.toml init
 ./wipsync --config /tmp/try.toml add <folder>
 ./wipsync --config /tmp/try.toml snapshot <folder>

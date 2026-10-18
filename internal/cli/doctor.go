@@ -15,6 +15,7 @@ import (
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
 	"github.com/ahaltindis/wipsync/internal/state"
@@ -66,23 +67,26 @@ func (r *report) skip(format string, args ...any) {
 func (r *report) run(ctx context.Context, cfgPath string) {
 	resticOK := r.restic(ctx)
 
-	cfg, err := config.Load(cfgPath)
-	if _, statErr := os.Stat(cfgPath); errors.Is(statErr, fs.ErrNotExist) {
-		r.fail("config: %s does not exist", cfgPath)
-		cfg = nil
-	} else if err != nil {
-		r.fail("config: %v", err)
-	} else {
-		r.ok("config: %s, client %q", cfgPath, cfg.Client)
+	// Opening it is what moves an older config into the database.
+	a, err := app.Open(cfgPath)
+	if err != nil {
+		r.fail("config and database: %v", err)
+		r.skip("repository: needs the database")
+		r.locks()
+		return
 	}
-
-	if cfg == nil {
-		r.skip("repository: needs the config")
-	} else {
-		r.repository(ctx, cfg, resticOK)
-		r.folders(cfg)
+	for _, note := range a.Notes {
+		fmt.Fprintf(r.out, "note  %s\n", note)
 	}
-	r.state()
+	if _, err := os.Stat(a.ConfigPath); errors.Is(err, fs.ErrNotExist) {
+		r.ok("config: %s does not exist, so the defaults apply", a.ConfigPath)
+	} else {
+		r.ok("config: %s", a.ConfigPath)
+	}
+	r.ok("database: %s, client %q", a.DB.Path, a.Data.Client)
+	r.repository(ctx, a, resticOK)
+	r.folders(a.Data)
+	r.locks()
 }
 
 func (r *report) restic(ctx context.Context) bool {
@@ -99,10 +103,11 @@ func (r *report) restic(ctx context.Context) bool {
 	return false
 }
 
-func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bool) {
+func (r *report) repository(ctx context.Context, a *app.App, resticOK bool) {
 	ready := resticOK
+	cfg := a.Data
 
-	if err := app.CheckRepository(cfg); err != nil {
+	if err := app.CheckRepository(cfg.Settings); err != nil {
 		r.fail("repository: %v", err)
 		ready = false
 	} else if strings.HasPrefix(cfg.Repository, "sftp:") {
@@ -112,11 +117,11 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 		}
 	}
 
-	if err := app.CheckPassword(cfg); err != nil {
+	if err := app.CheckPassword(cfg.Settings); err != nil {
 		r.fail("password: %v", err)
 		ready = false
 	} else if cfg.PasswordFile != "" {
-		file := cfg.PasswordFilePath()
+		file := cfg.PasswordFile
 		if info, err := os.Stat(file); err != nil {
 			r.fail("password: %v", err)
 			ready = false
@@ -133,7 +138,7 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 		r.skip("repository access: needs the checks above to pass")
 		return
 	}
-	client, _ := (&app.App{ConfigPath: cfg.Path, Config: cfg}).Client()
+	client, _ := a.Client()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx); err != nil {
@@ -154,7 +159,7 @@ func (r *report) repository(ctx context.Context, cfg *config.Config, resticOK bo
 	r.ok("server: ready for push")
 }
 
-func (r *report) folders(cfg *config.Config) {
+func (r *report) folders(cfg *db.Data) {
 	if len(cfg.Folders) == 0 {
 		r.ok("folders: none added yet")
 		return
@@ -162,7 +167,7 @@ func (r *report) folders(cfg *config.Config) {
 	for _, f := range cfg.Folders {
 		dir := cfg.Dir(f)
 		if _, mapped := cfg.Roots[f.Root]; !mapped {
-			r.fail("folder %s: root %q has no location in [roots]", f, f.Root)
+			r.fail("folder %s: root %q has no location", f, f.Root)
 		} else if info, err := os.Stat(dir); err != nil {
 			r.fail("folder %s: %v", f, err)
 		} else if !info.IsDir() {
@@ -173,7 +178,7 @@ func (r *report) folders(cfg *config.Config) {
 	}
 }
 
-func (r *report) state() {
+func (r *report) locks() {
 	store, err := state.Default()
 	if err == nil {
 		err = os.MkdirAll(store.Dir, 0o700)
@@ -186,8 +191,8 @@ func (r *report) state() {
 		}
 	}
 	if err != nil {
-		r.fail("state directory: %v", err)
+		r.fail("lock directory: %v", err)
 		return
 	}
-	r.ok("state directory: %s", store.Dir)
+	r.ok("lock directory: %s", store.Dir)
 }

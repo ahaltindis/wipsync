@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 	"github.com/ahaltindis/wipsync/internal/state"
 )
@@ -33,16 +33,16 @@ const (
 
 // Backend is what the watcher asks of the client. *app.App is the real one.
 type Backend interface {
-	Here() []config.Folder
-	Look(ctx context.Context, f config.Folder) (print string, changed bool, err error)
-	Snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error)
+	Here() []db.Folder
+	Look(ctx context.Context, f db.Folder) (print string, changed bool, err error)
+	Snapshot(ctx context.Context, f db.Folder) (restic.BackupResult, error)
 	Reach(ctx context.Context) error
 	Survey(ctx context.Context) (app.World, error)
 	ClientName() string
 }
 
 // Watcher runs the loop. Open is called again every Poll, so that folders
-// added to the config are picked up without a restart.
+// added by add or pull are picked up without a restart.
 type Watcher struct {
 	Open func() (Backend, error)
 	Log  *log.Logger
@@ -191,7 +191,7 @@ func (w *Watcher) reopen(now time.Time) {
 	if err != nil {
 		// The last good config goes on being used.
 		if err.Error() != w.openErr {
-			w.say(now, "cannot read the config: %v", err)
+			w.say(now, "cannot open the client: %v", err)
 			w.openErr = err.Error()
 		}
 		return
@@ -221,7 +221,7 @@ func (w *Watcher) reopen(now time.Time) {
 }
 
 // look decides what to do with a folder: nothing, wait, or snapshot.
-func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *folder) {
+func (w *Watcher) look(ctx context.Context, now time.Time, f db.Folder, st *folder) {
 	print, changed, err := w.back.Look(ctx, f)
 	switch {
 	case err != nil:
@@ -276,7 +276,7 @@ func (w *Watcher) look(ctx context.Context, now time.Time, f config.Folder, st *
 }
 
 // fail logs a folder's failure, once until it changes or the folder recovers.
-func (w *Watcher) fail(now time.Time, f config.Folder, st *folder, err error) {
+func (w *Watcher) fail(now time.Time, f db.Folder, st *folder, err error) {
 	if err.Error() != st.failed {
 		w.say(now, "%s: %v", f, err)
 		st.failed = err.Error()

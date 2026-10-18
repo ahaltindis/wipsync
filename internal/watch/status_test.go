@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -84,7 +84,7 @@ func TestStatusBehind(t *testing.T) {
 	got := shows(c)
 	m1, mine, other := snap("a1", "desktop", 30), snap("b1", "laptop", 40), snap("c1", "desktop", 3)
 	here := func(path string, st app.Status, base, master string, snaps ...restic.Snapshot) app.FolderState {
-		return app.FolderState{Folder: config.Folder{Root: "Projects", Path: path}, Dir: "/p/" + path, Status: st,
+		return app.FolderState{Folder: db.Folder{Root: "Projects", Path: path}, Dir: "/p/" + path, Status: st,
 			Base: base, Master: master, Snapshots: snaps}
 	}
 	c.back.world = app.World{Folders: []app.FolderState{

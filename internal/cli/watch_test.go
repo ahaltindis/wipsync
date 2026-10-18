@@ -53,7 +53,7 @@ func TestWatchTellsNews(t *testing.T) {
 	a.write("Projects/app/main.py", "print(2)\n")
 	a.must("", "snapshot", dirA)
 	a.must("", "push", dirA)
-	master := a.snapshots(a.config().Repository)[1].ID
+	master := a.snapshots(a.data().Repository)[1].ID
 	if got, want := check(), "wipsync: 1 update | Projects/app: master moved to "+master[:8]+" (client-a), pull to take it"; got != want {
 		t.Errorf("after a push:\n got %s\nwant %s", got, want)
 	}
@@ -61,7 +61,7 @@ func TestWatchTellsNews(t *testing.T) {
 	// client-a works on without pushing, and adds a folder.
 	a.write("Projects/app/main.py", "print(3)\n")
 	a.must("", "snapshot", dirA)
-	wip := a.snapshots(a.config().Repository)[2].ID
+	wip := a.snapshots(a.data().Repository)[2].ID
 	a.write("Projects/web/index.html", "hi\n")
 	dirWeb := filepath.Join(a.home, "Projects/web")
 	a.must("", "add", dirWeb)

@@ -2,64 +2,62 @@ package state
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
-func TestBase(t *testing.T) {
+func TestOld(t *testing.T) {
 	s := &Store{Dir: filepath.Join(t.TempDir(), "wipsync")}
+	dir := filepath.Join(s.Dir, "folders", "Projects", "Freelance", "app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]string{"base": "abc123\n", "master": "aaa111\n", "pulled": "yes\n", "base.tmp": "x"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(v), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Old("Projects", "Freelance/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"base": "abc123", "master": "aaa111", "pulled": "yes"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, err := s.Old("Projects", "other"); err != nil || len(got) != 0 {
+		t.Errorf("a folder without files: %v, %v", got, err)
+	}
 
-	if id, err := s.Base("Projects", "Freelance/app"); err != nil || id != "" {
-		t.Errorf("unset base = %q, %v", id, err)
-	}
-	if err := s.SetBase("Projects", "Freelance/app", "abc123"); err != nil {
+	// A held lock and its directory stay; everything else goes.
+	unlock, err := s.Lock("Projects", "Freelance/app")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetBase("Projects", "Freelance/app", "def456"); err != nil {
+	defer unlock()
+	gone := filepath.Join(s.Dir, "folders", "Hangarea", "dotfiles")
+	if err := os.MkdirAll(gone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := s.Base("Projects", "Freelance/app"); err != nil || id != "def456" {
-		t.Errorf("base = %q, %v; want def456", id, err)
-	}
-	if id, _ := s.Base("Projects", "Freelance/other"); id != "" {
-		t.Errorf("another folder has base %q", id)
-	}
-
-	// Master is kept apart from base.
-	if id, err := s.Master("Projects", "Freelance/app"); err != nil || id != "" {
-		t.Errorf("unset master = %q, %v", id, err)
-	}
-	if err := s.SetMaster("Projects", "Freelance/app", "aaa111"); err != nil {
+	if err := os.WriteFile(filepath.Join(gone, "base"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if id, _ := s.Master("Projects", "Freelance/app"); id != "aaa111" {
-		t.Errorf("master = %q", id)
-	}
-	if id, _ := s.Base("Projects", "Freelance/app"); id != "def456" {
-		t.Errorf("setting master changed base to %q", id)
-	}
-}
-
-func TestAfterPull(t *testing.T) {
-	s := &Store{Dir: filepath.Join(t.TempDir(), "wipsync")}
-	if got, err := s.AfterPull("Projects", "app"); err != nil || got {
-		t.Errorf("unset mark = %v, %v", got, err)
-	}
-	if err := s.SetAfterPull("Projects", "app", false); err != nil {
-		t.Errorf("clearing an unset mark: %v", err)
-	}
-	if err := s.SetAfterPull("Projects", "app", true); err != nil {
+	if err := s.RemoveOld(); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.AfterPull("Projects", "app"); !got {
-		t.Error("mark was not set")
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != "lock" {
+		t.Errorf("left %v, want only the lock", entries)
 	}
-	if err := s.SetAfterPull("Projects", "app", false); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(s.Dir, "folders", "Hangarea")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("an emptied directory stayed: %v", err)
 	}
-	if got, _ := s.AfterPull("Projects", "app"); got {
-		t.Error("mark was not cleared")
+	if err := (&Store{Dir: filepath.Join(t.TempDir(), "none")}).RemoveOld(); err != nil {
+		t.Errorf("without a store: %v", err)
 	}
 }
 

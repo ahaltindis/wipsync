@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -19,7 +19,7 @@ type History struct {
 }
 
 // Log returns the folder's history.
-func (a *App) Log(ctx context.Context, f config.Folder) (History, error) {
+func (a *App) Log(ctx context.Context, f db.Folder) (History, error) {
 	var h History
 	client, err := a.Client()
 	if err != nil {
@@ -28,7 +28,7 @@ func (a *App) Log(ctx context.Context, f config.Folder) (History, error) {
 	if err := restic.CheckVersion(ctx); err != nil {
 		return h, err
 	}
-	if h.Base, err = a.State.Base(f.Root, f.Path); err != nil {
+	if h.Base, err = a.DB.Base(f.Root, f.Path); err != nil {
 		return h, err
 	}
 	if h.Snapshots, err = client.Snapshots(ctx, Tags(f)); err != nil {
@@ -53,7 +53,7 @@ type Overview struct {
 
 // FolderView is one folder as seen from this client.
 type FolderView struct {
-	Folder config.Folder
+	Folder db.Folder
 	Dir    string                     // where it is on this client; "" if it is not
 	Latest map[string]restic.Snapshot // each client's latest snapshot
 
@@ -85,10 +85,10 @@ func (a *App) List(ctx context.Context) (Overview, error) {
 	o.MasterErr = masterErr
 
 	views := map[string]*FolderView{}
-	view := func(f config.Folder) *FolderView {
+	view := func(f db.Folder) *FolderView {
 		name := f.String()
 		if views[name] == nil {
-			views[name] = &FolderView{Folder: config.Folder{Root: f.Root, Path: f.Path}, Latest: map[string]restic.Snapshot{}}
+			views[name] = &FolderView{Folder: db.Folder{Root: f.Root, Path: f.Path}, Latest: map[string]restic.Snapshot{}}
 		}
 		return views[name]
 	}
@@ -101,9 +101,9 @@ func (a *App) List(ctx context.Context) (Overview, error) {
 			byID[s.ID] = s
 		}
 	}
-	for _, f := range a.Config.Folders {
+	for _, f := range a.Data.Folders {
 		v := view(f)
-		v.Folder, v.Dir = f, a.Config.Dir(f)
+		v.Folder, v.Dir = f, a.Data.Dir(f)
 	}
 	for name, v := range views {
 		v.Master = masters[name]

@@ -49,7 +49,7 @@ folder that is not on this client yet can be fetched with "wipsync pull".`,
 				} else {
 					fmt.Fprintf(out, "%-*s    %s\n", nameWidth, v.Folder, v.Dir)
 				}
-				printFolder(out, v, a.Config.Client, o.MasterErr == nil)
+				printFolder(out, v, a.Data.Client, o.MasterErr == nil)
 			}
 			if o.MasterErr != nil {
 				fmt.Fprintf(out, "\nmaster is unknown: %v\n", o.MasterErr)

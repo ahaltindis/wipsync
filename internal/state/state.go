@@ -1,5 +1,6 @@
-// Package state keeps what this client remembers about its folders. It lives
-// outside the folders, where a pull would overwrite it.
+// Package state holds the folders' locks. They live outside the folders,
+// where a pull would overwrite them, and not in the database: the kernel
+// lets a lock go however the process ends.
 package state
 
 import (
@@ -36,75 +37,52 @@ func (s *Store) file(root, path, name string) string {
 	return filepath.Join(s.Dir, "folders", root, filepath.FromSlash(path), name)
 }
 
-func (s *Store) get(root, path, name string) (string, error) {
-	data, err := os.ReadFile(s.file(root, path, name))
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+// The files each folder's state was kept in before the database, by name:
+// base, master, fingerprint and pulled.
+var oldFiles = []string{"base", "master", "fingerprint", "pulled"}
+
+// Old reads the files the folder's state was kept in before the database.
+// A missing file reads as "".
+func (s *Store) Old(root, path string) (map[string]string, error) {
+	values := map[string]string{}
+	for _, name := range oldFiles {
+		data, err := os.ReadFile(s.file(root, path, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		values[name] = strings.TrimSpace(string(data))
 	}
-	return strings.TrimSpace(string(data)), err
+	return values, nil
 }
 
-// set replaces the value in one step.
-func (s *Store) set(root, path, name, id string) error {
-	file := s.file(root, path, name)
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		return err
-	}
-	tmp := file + ".tmp"
-	if err := os.WriteFile(tmp, []byte(id+"\n"), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, file)
-}
-
-// Base returns the snapshot the folder is based on, or "" if there is none.
-func (s *Store) Base(root, path string) (string, error) {
-	return s.get(root, path, "base")
-}
-
-// SetBase records the snapshot the folder is based on.
-func (s *Store) SetBase(root, path, id string) error {
-	return s.set(root, path, "base", id)
-}
-
-// Master returns the master snapshot the folder was last in step with: the
-// one it last pushed or pulled. It is "" if it has done neither.
-func (s *Store) Master(root, path string) (string, error) {
-	return s.get(root, path, "master")
-}
-
-// SetMaster records the master snapshot the folder is in step with.
-func (s *Store) SetMaster(root, path, id string) error {
-	return s.set(root, path, "master", id)
-}
-
-// Fingerprint returns the folder's fingerprint at its last snapshot or
-// pull, or "" if there is none.
-func (s *Store) Fingerprint(root, path string) (string, error) {
-	return s.get(root, path, "fingerprint")
-}
-
-// SetFingerprint records the folder's fingerprint.
-func (s *Store) SetFingerprint(root, path, print string) error {
-	return s.set(root, path, "fingerprint", print)
-}
-
-// AfterPull reports whether the folder was pulled and not snapshotted since.
-func (s *Store) AfterPull(root, path string) (bool, error) {
-	v, err := s.get(root, path, "pulled")
-	return v != "", err
-}
-
-// SetAfterPull records or clears that mark.
-func (s *Store) SetAfterPull(root, path string, pulled bool) error {
-	if pulled {
-		return s.set(root, path, "pulled", "yes")
-	}
-	err := os.Remove(s.file(root, path, "pulled"))
-	if errors.Is(err, fs.ErrNotExist) {
+// RemoveOld removes all the files under the store but the locks, and the
+// directories left empty.
+func (s *Store) RemoveOld() error {
+	top := filepath.Join(s.Dir, "folders")
+	var dirs []string
+	err := filepath.WalkDir(top, func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case errors.Is(err, fs.ErrNotExist) && p == top:
+			return fs.SkipAll
+		case err != nil:
+			return err
+		case d.IsDir():
+			dirs = append(dirs, p)
+		case d.Name() != "lock":
+			return os.Remove(p)
+		}
 		return nil
+	})
+	if err != nil {
+		return err
 	}
-	return err
+	// Deepest first; one that still holds a lock stays.
+	for i := len(dirs) - 1; i >= 0; i-- {
+		os.Remove(dirs[i])
+	}
+	return nil
 }
 
 // Lock takes the folder's lock without waiting, or returns ErrBusy if

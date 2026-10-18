@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/fingerprint"
 	"github.com/ahaltindis/wipsync/internal/master"
 	"github.com/ahaltindis/wipsync/internal/restic"
@@ -25,7 +25,7 @@ type Target struct {
 
 // FindTarget picks what a pull of the folder would take: master, or with
 // from the latest snapshot of that client.
-func (a *App) FindTarget(ctx context.Context, f config.Folder, from string) (Target, error) {
+func (a *App) FindTarget(ctx context.Context, f db.Folder, from string) (Target, error) {
 	client, pointers, err := a.remote(ctx)
 	if err != nil {
 		return Target{}, err
@@ -43,7 +43,7 @@ func (a *App) FindTarget(ctx context.Context, f config.Folder, from string) (Tar
 
 // pullTarget picks the snapshot to pull from a folder's snapshots, oldest
 // first: master, or the latest one of the named client.
-func pullTarget(ctx context.Context, pointers master.Pointers, list []restic.Snapshot, f config.Folder, from string) (restic.Snapshot, bool, error) {
+func pullTarget(ctx context.Context, pointers master.Pointers, list []restic.Snapshot, f db.Folder, from string) (restic.Snapshot, bool, error) {
 	var clients []string
 	for _, s := range list {
 		if !slices.Contains(clients, s.Host) {
@@ -102,8 +102,8 @@ type PullResult struct {
 // Pull brings master, or with from a client's latest snapshot, into a
 // folder that is on this client, if the target is ahead of it. The
 // folder's state is saved as a snapshot first.
-func (a *App) Pull(ctx context.Context, f config.Folder, from string) (PullResult, error) {
-	res := PullResult{Dir: a.Config.Dir(f)}
+func (a *App) Pull(ctx context.Context, f db.Folder, from string) (PullResult, error) {
+	res := PullResult{Dir: a.Data.Dir(f)}
 	unlock, err := a.lock(f)
 	if err != nil {
 		return res, err
@@ -115,7 +115,7 @@ func (a *App) Pull(ctx context.Context, f config.Folder, from string) (PullResul
 		return res, err
 	}
 	res.Saved = saved.SnapshotID
-	base, err := a.State.Base(f.Root, f.Path)
+	base, err := a.DB.Base(f.Root, f.Path)
 	if err != nil {
 		return res, err
 	}
@@ -135,7 +135,7 @@ func (a *App) Pull(ctx context.Context, f config.Folder, from string) (PullResul
 		if !t.IsMaster {
 			return nil
 		}
-		return a.State.SetMaster(f.Root, f.Path, t.Snapshot.ID)
+		return a.DB.SetMaster(f.Root, f.Path, t.Snapshot.ID)
 	}
 
 	switch {
@@ -164,7 +164,7 @@ func (a *App) Pull(ctx context.Context, f config.Folder, from string) (PullResul
 
 // RootDir returns where a root is on this client.
 func (a *App) RootDir(root string) (string, bool) {
-	dir, ok := a.Config.Roots[root]
+	dir, ok := a.Data.Roots[root]
 	return dir, ok
 }
 
@@ -173,7 +173,7 @@ func (a *App) CheckNewRoot(root, dir string) error {
 	if problem := a.CheckRootName(root); problem != "" {
 		return errors.New(problem)
 	}
-	if name, ok := a.Config.RootAt(dir); ok {
+	if name, ok := a.Data.RootAt(dir); ok {
 		return fmt.Errorf("%s is already the root %s on this client", dir, name)
 	}
 	return nil
@@ -181,7 +181,7 @@ func (a *App) CheckNewRoot(root, dir string) error {
 
 // Fetch brings a folder that is not on this client yet into rootDir, the
 // location of its root here.
-func (a *App) Fetch(ctx context.Context, f config.Folder, rootDir string, t Target) (PullResult, error) {
+func (a *App) Fetch(ctx context.Context, f db.Folder, rootDir string, t Target) (PullResult, error) {
 	dir := filepath.Join(rootDir, filepath.FromSlash(f.Path))
 	res := PullResult{Outcome: Pulled, Target: t.Snapshot, Dir: dir}
 	unlock, err := a.lock(f)
@@ -193,7 +193,7 @@ func (a *App) Fetch(ctx context.Context, f config.Folder, rootDir string, t Targ
 	if err != nil {
 		return res, err
 	}
-	if other, ok := a.Config.Overlap(dir); ok {
+	if other, ok := a.Data.Overlap(dir); ok {
 		return res, fmt.Errorf("%s overlaps %s, which is already on this client", dir, other)
 	}
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
@@ -216,46 +216,65 @@ func (a *App) Fetch(ctx context.Context, f config.Folder, rootDir string, t Targ
 	if f.Ignore == nil {
 		f.Ignore = []string{}
 	}
-	a.Config.Roots[f.Root] = rootDir
-	a.Config.Folders = append(a.Config.Folders, f)
-	if err := a.Config.Save(a.ConfigPath); err != nil {
+	// Added and recorded at once, so that it is not known here without
+	// knowing what it was pulled from.
+	print := a.print(ctx, f, dir)
+	err = a.DB.Update(func(w db.Writer) error {
+		if err := w.AddFolder(f, rootDir); err != nil {
+			return err
+		}
+		return record(w, f, t.Snapshot, t.IsMaster, print)
+	})
+	if err != nil {
 		return res, err
 	}
-	return res, a.record(ctx, f, dir, t.Snapshot, t.IsMaster)
+	a.Data.Roots[f.Root] = rootDir
+	a.Data.Folders = append(a.Data.Folders, f)
+	return res, nil
 }
 
-// record notes that the folder at dir now matches the snapshot.
-func (a *App) record(ctx context.Context, f config.Folder, dir string, target restic.Snapshot, isMaster bool) error {
-	if err := a.State.SetBase(f.Root, f.Path, target.ID); err != nil {
+// print takes the fingerprint of the folder at dir, as it is after a pull:
+// what later looks are compared with. It is "" if it cannot be taken.
+func (a *App) print(ctx context.Context, f db.Folder, dir string) string {
+	print, err := fingerprint.Of(ctx, dir, f.Ignore)
+	if err != nil {
+		return ""
+	}
+	return print
+}
+
+// record notes that the folder now matches the snapshot, and has the
+// fingerprint print.
+func record(w db.Writer, f db.Folder, target restic.Snapshot, isMaster bool, print string) error {
+	if err := w.SetBase(f.Root, f.Path, target.ID); err != nil {
 		return err
 	}
 	if isMaster {
-		if err := a.State.SetMaster(f.Root, f.Path, target.ID); err != nil {
+		if err := w.SetMaster(f.Root, f.Path, target.ID); err != nil {
 			return err
 		}
 	}
-	if err := a.State.SetAfterPull(f.Root, f.Path, true); err != nil {
+	if err := w.SetAfterPull(f.Root, f.Path, true); err != nil {
 		return err
 	}
-	// The folder as it is now is what later looks are compared with.
-	if print, err := fingerprint.Of(ctx, dir, f.Ignore); err == nil {
-		return a.State.SetFingerprint(f.Root, f.Path, print)
+	if print == "" {
+		return nil
 	}
-	return nil
+	return w.SetFingerprint(f.Root, f.Path, print)
 }
 
 // apply makes the folder match the target snapshot and records that. base
 // is the snapshot holding the folder's state from before, for the message
 // if it fails halfway. It returns the folder's ignore rules and whether
 // they changed.
-func (a *App) apply(ctx context.Context, f config.Folder, target restic.Snapshot, isMaster bool, base string) ([]string, bool, error) {
+func (a *App) apply(ctx context.Context, f db.Folder, target restic.Snapshot, isMaster bool, base string) ([]string, bool, error) {
 	client, err := a.Client()
 	if err != nil {
 		return nil, false, err
 	}
 	// Paths ignored on either side are left alone, so that nothing a
 	// client keeps out of its snapshots is deleted here.
-	dir := a.Config.Dir(f)
+	dir := a.Data.Dir(f)
 	excludes := slices.Clone(f.Ignore)
 	for _, e := range target.Excludes {
 		if !slices.Contains(excludes, e) {
@@ -267,22 +286,30 @@ func (a *App) apply(ctx context.Context, f config.Folder, target restic.Snapshot
 	}
 
 	// From here on the folder follows the rules its snapshot was taken with.
-	changed := !slices.Equal(f.Ignore, target.Excludes)
-	if changed {
-		for i := range a.Config.Folders {
-			if a.Config.Folders[i].String() == f.String() {
-				a.Config.Folders[i].Ignore = slices.Clone(target.Excludes)
-				if a.Config.Folders[i].Ignore == nil {
-					a.Config.Folders[i].Ignore = []string{}
-				}
-				f = a.Config.Folders[i]
+	ignore := slices.Clone(target.Excludes)
+	if ignore == nil {
+		ignore = []string{}
+	}
+	changed := !slices.Equal(f.Ignore, ignore)
+	f.Ignore = ignore
+	print := a.print(ctx, f, dir)
+	err = a.DB.Update(func(w db.Writer) error {
+		if changed {
+			if err := w.SetIgnore(f, ignore); err != nil {
+				return err
 			}
 		}
-		if err := a.Config.Save(a.ConfigPath); err != nil {
-			return nil, false, err
+		return record(w, f, target, isMaster, print)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range a.Data.Folders {
+		if a.Data.Folders[i].String() == f.String() {
+			a.Data.Folders[i].Ignore = ignore
 		}
 	}
-	return f.Ignore, changed, a.record(ctx, f, dir, target, isMaster)
+	return ignore, changed, nil
 }
 
 // descends reports whether snapshot id has ancestor somewhere up its chain

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -17,12 +18,12 @@ import (
 // one; the tests have their own.
 type backend interface {
 	Survey(ctx context.Context) (app.World, error)
-	Snapshot(ctx context.Context, f config.Folder) (restic.BackupResult, error)
-	Push(ctx context.Context, f config.Folder) (app.PushResult, error)
-	Pull(ctx context.Context, f config.Folder, from string) (app.PullResult, error)
-	FindTarget(ctx context.Context, f config.Folder, from string) (app.Target, error)
-	Fetch(ctx context.Context, f config.Folder, rootDir string, t app.Target) (app.PullResult, error)
-	Restore(ctx context.Context, f config.Folder, name string) (app.RestoreResult, error)
+	Snapshot(ctx context.Context, f db.Folder) (restic.BackupResult, error)
+	Push(ctx context.Context, f db.Folder) (app.PushResult, error)
+	Pull(ctx context.Context, f db.Folder, from string) (app.PullResult, error)
+	FindTarget(ctx context.Context, f db.Folder, from string) (app.Target, error)
+	Fetch(ctx context.Context, f db.Folder, rootDir string, t app.Target) (app.PullResult, error)
+	Restore(ctx context.Context, f db.Folder, name string) (app.RestoreResult, error)
 	RootDir(root string) (string, bool)
 	CheckNewRoot(root, dir string) error
 
@@ -32,7 +33,7 @@ type backend interface {
 	RootAbove(dir string) (name, rootDir string, ok bool)
 	RootAt(dir string) (string, bool)
 	CheckRootName(name string) string
-	Add(dir, rootName, rootDir string) (config.Folder, error)
+	Add(dir, rootName, rootDir string) (db.Folder, error)
 }
 
 // leftView is what the left pane shows.
@@ -102,8 +103,8 @@ func New(a *app.App, theme Theme) Model {
 		open.Here = config.DefaultOpenHere
 	}
 	return Model{
-		client:     a.Config.Client,
-		repository: a.Config.Repository,
+		client:     a.Data.Client,
+		repository: a.Data.Repository,
 		back:       a,
 		theme:      theme,
 		open:       open,

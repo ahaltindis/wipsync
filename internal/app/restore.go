@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -26,7 +26,7 @@ type RestoreResult struct {
 // Restore makes the folder match one of its snapshots, whatever state it
 // is in, after saving that state as a snapshot. The snapshot is named by
 // the start of its ID, or is "master".
-func (a *App) Restore(ctx context.Context, f config.Folder, name string) (RestoreResult, error) {
+func (a *App) Restore(ctx context.Context, f db.Folder, name string) (RestoreResult, error) {
 	var res RestoreResult
 	unlock, err := a.lock(f)
 	if err != nil {
@@ -55,7 +55,7 @@ func (a *App) Restore(ctx context.Context, f config.Folder, name string) (Restor
 		return res, err
 	}
 	res.Saved = saved.SnapshotID
-	if res.Undo, err = a.State.Base(f.Root, f.Path); err != nil {
+	if res.Undo, err = a.DB.Base(f.Root, f.Path); err != nil {
 		return res, err
 	}
 	if res.Undo == res.Target.ID {
@@ -68,7 +68,7 @@ func (a *App) Restore(ctx context.Context, f config.Folder, name string) (Restor
 
 // findSnapshot picks one of a folder's snapshots: master, or the one whose
 // ID starts with name.
-func findSnapshot(list []restic.Snapshot, f config.Folder, name, masterID string) (restic.Snapshot, error) {
+func findSnapshot(list []restic.Snapshot, f db.Folder, name, masterID string) (restic.Snapshot, error) {
 	if name == "master" {
 		if masterID == "" {
 			return restic.Snapshot{}, fmt.Errorf("%s has no master yet", f)

@@ -18,6 +18,7 @@ import (
 
 	"github.com/ahaltindis/wipsync/internal/app"
 	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -36,7 +37,7 @@ func snap(id, parent, host string, minutesAgo int) restic.Snapshot {
 func sampleWorld() app.World {
 	b1, b2 := snap("b1", "", "desktop", 90), snap("b2", strings.Repeat("b1", 32), "laptop", 30)
 	folder := func(root, path, dir string, s app.Status, base, master string, snaps ...restic.Snapshot) app.FolderState {
-		return app.FolderState{Folder: config.Folder{Root: root, Path: path}, Dir: dir, Status: s,
+		return app.FolderState{Folder: db.Folder{Root: root, Path: path}, Dir: dir, Status: s,
 			Base: base, Master: master, Snapshots: snaps}
 	}
 	return app.World{Folders: []app.FolderState{
@@ -66,30 +67,30 @@ func (f *fake) did(call string) error {
 
 func (f *fake) Survey(context.Context) (app.World, error) { return f.world, f.surveyErr }
 
-func (f *fake) Snapshot(_ context.Context, fo config.Folder) (restic.BackupResult, error) {
+func (f *fake) Snapshot(_ context.Context, fo db.Folder) (restic.BackupResult, error) {
 	err := f.did("snapshot " + fo.String())
 	return restic.BackupResult{SnapshotID: strings.Repeat("5", 64), FilesChanged: 2, BytesStored: 2048}, err
 }
 
-func (f *fake) Push(_ context.Context, fo config.Folder) (app.PushResult, error) {
+func (f *fake) Push(_ context.Context, fo db.Folder) (app.PushResult, error) {
 	return app.PushResult{Snapshot: snap("b2", "", "laptop", 30)}, f.did("push " + fo.String())
 }
 
-func (f *fake) Pull(_ context.Context, fo config.Folder, from string) (app.PullResult, error) {
+func (f *fake) Pull(_ context.Context, fo db.Folder, from string) (app.PullResult, error) {
 	err := f.did("pull " + fo.String() + " from " + from)
 	return app.PullResult{Outcome: app.Pulled, Target: snap("b2", "", "desktop", 30), Saved: strings.Repeat("7", 64)}, err
 }
 
-func (f *fake) FindTarget(_ context.Context, fo config.Folder, from string) (app.Target, error) {
+func (f *fake) FindTarget(_ context.Context, fo db.Folder, from string) (app.Target, error) {
 	return app.Target{Snapshot: snap("b1", "", "desktop", 90)}, f.did("target " + fo.String() + " from " + from)
 }
 
-func (f *fake) Fetch(_ context.Context, fo config.Folder, rootDir string, t app.Target) (app.PullResult, error) {
+func (f *fake) Fetch(_ context.Context, fo db.Folder, rootDir string, t app.Target) (app.PullResult, error) {
 	err := f.did("fetch " + fo.String() + " into " + rootDir)
 	return app.PullResult{Outcome: app.Pulled, Target: t.Snapshot, Dir: rootDir + "/" + fo.Path}, err
 }
 
-func (f *fake) Restore(_ context.Context, fo config.Folder, name string) (app.RestoreResult, error) {
+func (f *fake) Restore(_ context.Context, fo db.Folder, name string) (app.RestoreResult, error) {
 	err := f.did("restore " + fo.String() + " to " + name[:8])
 	return app.RestoreResult{Target: snap("b1", "", "desktop", 90), Undo: strings.Repeat("7", 64)}, err
 }
@@ -132,10 +133,10 @@ func (f *fake) CheckRootName(name string) string {
 	return ""
 }
 
-func (f *fake) Add(dir, rootName, rootDir string) (config.Folder, error) {
+func (f *fake) Add(dir, rootName, rootDir string) (db.Folder, error) {
 	err := f.did("add " + dir + " as " + rootName + " at " + rootDir)
 	rel, _ := filepath.Rel(rootDir, dir)
-	return config.Folder{Root: rootName, Path: rel}, err
+	return db.Folder{Root: rootName, Path: rel}, err
 }
 
 // started returns a model that has its size and has read the sample world.
@@ -775,7 +776,7 @@ func browsing(t *testing.T) (Model, *fake, string) {
 	}
 	b1 := snap("b1", "", "desktop", 90)
 	folder := func(root, path string, s app.Status) app.FolderState {
-		return app.FolderState{Folder: config.Folder{Root: root, Path: path}, Dir: filepath.Join(home, root, path),
+		return app.FolderState{Folder: db.Folder{Root: root, Path: path}, Dir: filepath.Join(home, root, path),
 			Status: s, Base: b1.ID, Master: b1.ID, Snapshots: []restic.Snapshot{b1}}
 	}
 	back := &fake{
@@ -966,8 +967,8 @@ func TestSwitchingKeepsPlace(t *testing.T) {
 	// A folder that is not here has no directory. With its root known, the
 	// browser goes to the root; otherwise it stays where it was.
 	back.world.Folders = append(back.world.Folders,
-		app.FolderState{Folder: config.Folder{Root: "Projects", Path: "aha/website"}, Status: app.NotHere},
-		app.FolderState{Folder: config.Folder{Root: "elsewhere", Path: "thing"}, Status: app.NotHere})
+		app.FolderState{Folder: db.Folder{Root: "Projects", Path: "aha/website"}, Status: app.NotHere},
+		app.FolderState{Folder: db.Folder{Root: "elsewhere", Path: "thing"}, Status: app.NotHere})
 	m = send(t, m, m.load()())
 	m = show(keys(t, m, "tab"), "other", "Projects")
 	m = keys(t, goTo(t, keys(t, m, "tab"), "elsewhere/thing"), "tab")
@@ -986,7 +987,7 @@ func TestSwitchingToHiddenFolder(t *testing.T) {
 	m, back, home := browsing(t)
 	dir := filepath.Join(home, "Projects/.cache")
 	back.world.Folders = append(back.world.Folders, app.FolderState{
-		Folder: config.Folder{Root: "Projects", Path: ".cache"}, Dir: dir, Status: app.Changed})
+		Folder: db.Folder{Root: "Projects", Path: ".cache"}, Dir: dir, Status: app.Changed})
 	m = send(t, m, m.load()())
 	m = keys(t, goTo(t, m, "Projects/.cache"), "tab")
 	if m.path() != dir {
@@ -1083,9 +1084,9 @@ func TestPullingMarked(t *testing.T) {
 	// A root with no place here is asked for once; two such roots are too many.
 	back.calls, back.roots = nil, map[string]string{"notes": "/home/u/notes"}
 	back.world.Folders = append(back.world.Folders,
-		app.FolderState{Folder: config.Folder{Root: "Work", Path: "a"}, Status: app.NotHere},
-		app.FolderState{Folder: config.Folder{Root: "Work", Path: "b"}, Status: app.NotHere},
-		app.FolderState{Folder: config.Folder{Root: "Zeta", Path: "c"}, Status: app.NotHere})
+		app.FolderState{Folder: db.Folder{Root: "Work", Path: "a"}, Status: app.NotHere},
+		app.FolderState{Folder: db.Folder{Root: "Work", Path: "b"}, Status: app.NotHere},
+		app.FolderState{Folder: db.Folder{Root: "Zeta", Path: "c"}, Status: app.NotHere})
 	m = send(t, m, m.load()())
 	t.Setenv("HOME", "/home/u")
 	m = keys(t, goTo(t, m, "Work"), " ", "p")

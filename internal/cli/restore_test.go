@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/ahaltindis/wipsync/internal/state"
 )
 
 // The way out after a refused pull: give up the local changes, take
@@ -58,7 +56,7 @@ func TestRestoreMasterAfterDrift(t *testing.T) {
 	}
 
 	// In step with master again: work continues and can be pushed.
-	store, _ := state.Default()
+	store := currentDB(t)
 	if m, _ := store.Master("Projects", "app"); m != masterID {
 		t.Errorf("recorded master = %q, want %q", m, masterID)
 	}

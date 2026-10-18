@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 )
 
 func pullCmd() *cobra.Command {
@@ -48,7 +48,7 @@ for its location once and remembers it.`,
 
 			if f, err := a.Folder(arg); err == nil {
 				if rootFlag != "" {
-					return fmt.Errorf("%s is already on this client, at %s; --root is for a folder that is not", f, a.Config.Dir(f))
+					return fmt.Errorf("%s is already on this client, at %s; --root is for a folder that is not", f, a.Data.Dir(f))
 				}
 				res, err := a.Pull(ctx, f, from)
 				if res.Saved != "" {
@@ -77,7 +77,7 @@ for its location once and remembers it.`,
 			if !ok {
 				return fmt.Errorf("%q is not a folder name; give it as Root/path, see wipsync list", arg)
 			}
-			f := config.Folder{Root: root, Path: path}
+			f := db.Folder{Root: root, Path: path}
 			// Found before asking anything, so a mistyped name costs no answers.
 			target, err := a.FindTarget(ctx, f, from)
 			if err != nil {

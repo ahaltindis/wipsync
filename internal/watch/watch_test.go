@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 	"github.com/ahaltindis/wipsync/internal/state"
 )
 
 // fake is a client whose folders change when the test says so.
 type fake struct {
-	folders []config.Folder
+	folders []db.Folder
 	print   map[string]string // each folder's fingerprint now
 	saved   map[string]string // and at its last snapshot
 	down    bool              // the server does not answer
@@ -40,14 +40,14 @@ func (f *fake) Survey(context.Context) (app.World, error) {
 
 func (f *fake) ClientName() string { return "laptop" }
 
-func (f *fake) Here() []config.Folder { return f.folders }
+func (f *fake) Here() []db.Folder { return f.folders }
 
-func (f *fake) Look(_ context.Context, fo config.Folder) (string, bool, error) {
+func (f *fake) Look(_ context.Context, fo db.Folder) (string, bool, error) {
 	p := f.print[fo.String()]
 	return p, p != f.saved[fo.String()], nil
 }
 
-func (f *fake) Snapshot(_ context.Context, fo config.Folder) (restic.BackupResult, error) {
+func (f *fake) Snapshot(_ context.Context, fo db.Folder) (restic.BackupResult, error) {
 	f.calls = append(f.calls, "snapshot "+fo.String())
 	switch {
 	case f.busy:
@@ -80,7 +80,7 @@ type clock struct {
 
 func newClock(t *testing.T) *clock {
 	back := &fake{
-		folders: []config.Folder{{Root: "Projects", Path: "app"}, {Root: "Projects", Path: "web"}},
+		folders: []db.Folder{{Root: "Projects", Path: "app"}, {Root: "Projects", Path: "web"}},
 		print:   map[string]string{"Projects/app": "a1", "Projects/web": "w1"},
 		saved:   map[string]string{"Projects/app": "a1", "Projects/web": "w1"},
 	}
@@ -241,7 +241,7 @@ func TestFailureLoggedOnce(t *testing.T) {
 
 func TestNewFolderPickedUp(t *testing.T) {
 	c := newClock(t)
-	c.back.folders = append(c.back.folders, config.Folder{Root: "notes", Path: "journal"})
+	c.back.folders = append(c.back.folders, db.Folder{Root: "notes", Path: "journal"})
 	c.back.print["notes/journal"] = "n1" // never saved
 	calls := c.at(Poll + Quiet + tick)
 	if strings.Join(calls, " ") != "ping snapshot notes/journal" {
@@ -277,7 +277,7 @@ func TestNews(t *testing.T) {
 	m1, m2, mine := snap("a1", "desktop", 30), snap("a2", "desktop", 20), snap("b1", "laptop", 40)
 	w1 := snap("c1", "desktop", 3)
 	here := func(path, dir string, st app.Status, base, master string, snaps ...restic.Snapshot) app.FolderState {
-		return app.FolderState{Folder: config.Folder{Root: "Projects", Path: path}, Dir: dir, Status: st,
+		return app.FolderState{Folder: db.Folder{Root: "Projects", Path: path}, Dir: dir, Status: st,
 			Base: base, Master: master, Snapshots: snaps}
 	}
 	c.back.world = app.World{Folders: []app.FolderState{
@@ -348,7 +348,7 @@ func TestNotifyFailureLogged(t *testing.T) {
 	m1, mine := snap("a1", "desktop", 30), snap("b1", "laptop", 40)
 	for i := range 3 {
 		m := snap(fmt.Sprintf("e%d", i), "desktop", 1)
-		c.back.world = app.World{Folders: []app.FolderState{{Folder: config.Folder{Root: "Projects", Path: "app"}, Dir: "/p/app",
+		c.back.world = app.World{Folders: []app.FolderState{{Folder: db.Folder{Root: "Projects", Path: "app"}, Dir: "/p/app",
 			Status: app.Behind, Base: mine.ID, Master: m.ID, Snapshots: []restic.Snapshot{m, m1, mine}}}}
 		c.at(Check)
 	}

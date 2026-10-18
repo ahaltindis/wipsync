@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/restic"
 )
 
@@ -19,10 +20,10 @@ func initCmd() *cobra.Command {
 		Long: `Set up this client: the repository password and location.
 
 Asks where the repository password comes from and where the repository is,
-creates the repository if there is none yet, and saves both in the config.`,
+creates the repository if there is none yet, and saves both in the database.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfgPath, cfg, err := loadConfig(cmd)
+			a, err := open(cmd)
 			if err != nil {
 				return err
 			}
@@ -35,15 +36,15 @@ creates the repository if there is none yet, and saves both in the config.`,
 			if err := restic.CheckVersion(ctx); err != nil {
 				return err
 			}
-			if cfg.Repository != "" {
-				again, err := p.confirm("Already set up for "+cfg.Repository+". Set it up again?", false)
+			if a.Data.Repository != "" {
+				again, err := p.confirm("Already set up for "+a.Data.Repository+". Set it up again?", false)
 				if err != nil || !again {
 					return err
 				}
 			}
 
 			client := &restic.Client{}
-			passFile := filepath.Join(filepath.Dir(cfgPath), "password")
+			passFile := filepath.Join(filepath.Dir(a.DB.Path), "password")
 			method, err := p.choose("Where does the repository password come from?", "Method", []string{
 				"a file kept by wipsync (" + passFile + ")",
 				"a command that prints it, for example from a keyring",
@@ -92,18 +93,16 @@ creates the repository if there is none yet, and saves both in the config.`,
 				return err
 			}
 
-			cfg.Repository = client.Repository
-			cfg.PasswordCommand = client.PasswordCommand
-			cfg.PasswordFile = ""
-			if client.PasswordFile != "" {
-				// Kept relative, so it is found beside the config wherever
-				// wipsync is run from.
-				cfg.PasswordFile = filepath.Base(passFile)
+			settings := db.Settings{
+				Client:          a.Data.Client,
+				Repository:      client.Repository,
+				PasswordFile:    client.PasswordFile,
+				PasswordCommand: client.PasswordCommand,
 			}
-			if err := cfg.Save(cfgPath); err != nil {
+			if err := a.DB.SetSettings(settings); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Saved %s for client %q.\n", cfgPath, cfg.Client)
+			fmt.Fprintf(out, "Saved in %s for client %q.\n", a.DB.Path, settings.Client)
 			return nil
 		},
 	}

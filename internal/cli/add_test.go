@@ -8,19 +8,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 )
 
 // env is a fake home directory with a config file beside it.
 type env struct {
 	t    *testing.T
+	dir  string // holds the client's home, config, data and state
 	home string
 	cfg  string
 }
 
 func newEnv(t *testing.T) *env {
 	base := t.TempDir()
-	e := &env{t: t, home: filepath.Join(base, "home"), cfg: filepath.Join(base, "config.toml")}
+	e := &env{t: t, dir: base, home: filepath.Join(base, "home"), cfg: filepath.Join(base, "config.toml")}
 	e.use()
 	return e
 }
@@ -28,9 +29,10 @@ func newEnv(t *testing.T) *env {
 // use makes this the client that commands run as. A test with two clients
 // switches between them.
 func (e *env) use() {
-	base := filepath.Dir(e.cfg)
+	base := e.dir
 	e.t.Setenv("HOME", e.home)
 	e.t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
+	e.t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
 	e.t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 }
 
@@ -59,18 +61,40 @@ func (e *env) runIn(stdin io.Reader, args ...string) (string, error) {
 
 // cfgFile makes sure the config file exists and returns its path.
 func (e *env) cfgFile() string {
-	if err := e.config().Save(e.cfg); err != nil {
-		e.t.Fatal(err)
-	}
-	return e.cfg
-}
-
-func (e *env) config() *config.Config {
-	c, err := config.Load(e.cfg)
+	f, err := os.OpenFile(e.cfg, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	return c
+	f.Close()
+	return e.cfg
+}
+
+// db opens this client's database.
+func (e *env) db() *db.DB {
+	d, err := db.Open(filepath.Join(e.dir, "data", "wipsync", "wipsync.db"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return d
+}
+
+// data loads what this client's database holds.
+func (e *env) data() *db.Data {
+	d, err := e.db().Load()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return d
+}
+
+// set changes this client's settings.
+func (e *env) set(change func(s *db.Settings)) {
+	e.t.Helper()
+	s := e.data().Settings
+	change(&s)
+	if err := e.db().SetSettings(s); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func TestAddAsksForRoot(t *testing.T) {
@@ -86,7 +110,7 @@ func TestAddAsksForRoot(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	c := e.config()
+	c := e.data()
 	if c.Roots["Projects"] != filepath.Join(e.home, "Projects") {
 		t.Errorf("roots = %v", c.Roots)
 	}
@@ -105,7 +129,7 @@ func TestAddChoosesLowerRoot(t *testing.T) {
 	if out, err := e.run("9\n2\n", "add", dir); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	f := e.config().Folders[0]
+	f := e.data().Folders[0]
 	if f.Root != "Freelance" || f.Path != "kadir/boxing-machine" {
 		t.Errorf("folder = %+v", f)
 	}
@@ -124,7 +148,7 @@ func TestAddWithoutTerminal(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "pass --root") {
 		t.Errorf("err = %v", err)
 	}
-	if n := len(e.config().Folders); n != 0 {
+	if n := len(e.data().Folders); n != 0 {
 		t.Errorf("%d folders, want 0", n)
 	}
 
@@ -132,7 +156,7 @@ func TestAddWithoutTerminal(t *testing.T) {
 	if out, err := e.runIn(stdin, "add", e.mkdir("Other/app")); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := e.config().Folders[0].String(); got != "Other/app" {
+	if got := e.data().Folders[0].String(); got != "Other/app" {
 		t.Errorf("folder = %s", got)
 	}
 }
@@ -152,7 +176,7 @@ func TestAddUsesKnownRoot(t *testing.T) {
 	if strings.Contains(out, "Which parent") {
 		t.Errorf("asked for a root that is already known:\n%s", out)
 	}
-	c := e.config()
+	c := e.data()
 	if len(c.Folders) != 2 || c.Folders[1].String() != "Projects/aha/wipsync" {
 		t.Errorf("folders = %+v", c.Folders)
 	}
@@ -165,7 +189,7 @@ func TestAddRootFlag(t *testing.T) {
 	if out, err := e.run("", "add", dir, "--root", filepath.Join(e.home, "Projects/Freelance")); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := e.config().Folders[0].String(); got != "Freelance/kadir/boxing-machine" {
+	if got := e.data().Folders[0].String(); got != "Freelance/kadir/boxing-machine" {
 		t.Errorf("folder = %s", got)
 	}
 
@@ -185,7 +209,7 @@ func TestAddTwice(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already added as Projects/app") {
 		t.Errorf("err = %v", err)
 	}
-	if n := len(e.config().Folders); n != 1 {
+	if n := len(e.data().Folders); n != 1 {
 		t.Errorf("%d folders, want 1", n)
 	}
 }
@@ -205,7 +229,7 @@ func TestAddOverlap(t *testing.T) {
 	if out, err := e.run("\n", "add", e.mkdir("Projects/group/app2")); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if n := len(e.config().Folders); n != 2 {
+	if n := len(e.data().Folders); n != 2 {
 		t.Errorf("%d folders, want 2", n)
 	}
 }
@@ -216,7 +240,7 @@ func TestAddCommaInPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "comma") {
 		t.Errorf("err = %v", err)
 	}
-	if n := len(e.config().Folders); n != 0 {
+	if n := len(e.data().Folders); n != 0 {
 		t.Errorf("%d folders, want 0", n)
 	}
 }
@@ -236,7 +260,7 @@ func TestAddRootNameConflict(t *testing.T) {
 	if !strings.Contains(out, `root name "Projects" is already used`) {
 		t.Errorf("output does not explain the clash:\n%s", out)
 	}
-	c := e.config()
+	c := e.data()
 	if c.Roots["Work"] != filepath.Join(e.home, "mnt/Projects") || c.Folders[1].String() != "Work/tool" {
 		t.Errorf("roots = %v, folders = %+v", c.Roots, c.Folders)
 	}
@@ -251,7 +275,7 @@ func TestAddRootNameFlag(t *testing.T) {
 	if out, err := e.run("", "add", dir, "--root-name", "Projects"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := e.config().Folders[0].String(); got != "Projects/app" {
+	if got := e.data().Folders[0].String(); got != "Projects/app" {
 		t.Errorf("folder = %s", got)
 	}
 	if _, err := e.run("", "add", e.mkdir("other/app"), "--root-name", "a,b"); err == nil {
@@ -272,4 +296,18 @@ func TestAddNotADirectory(t *testing.T) {
 	if _, err := e.run("", "add", filepath.Join(e.home, "missing")); err == nil {
 		t.Error("accepted a missing path")
 	}
+}
+
+// currentDB opens the database of the client that commands run as.
+func currentDB(t *testing.T) *db.DB {
+	t.Helper()
+	path, err := db.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }

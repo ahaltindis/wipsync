@@ -95,12 +95,30 @@ on a root, everything under it), `r` restore. Pull and restore ask first. Space 
   config's `[open]` as `window` and `here`. The bottom line shows only `? help  q quit`; `?` lists
   every key, with those that do nothing where the selection is dimmed. Colours come from
   `theme.toml` beside the config.
-- **Config**: `~/.config/wipsync/config.toml` holds the server, the folders and their ignore rules,
-  and where the repository password comes from: `password_file` or `password_command`, handed to
-  restic as is.
-- **State**: `~/.local/state/wipsync/` holds, per folder, the snapshot it is based on, the master it
-  last saw, and its fingerprint. Not inside the
-  folder, where a pull would overwrite it.
+- **Config**: `~/.config/wipsync/config.toml` holds only what the user sets: `[open]` and `[tray]`.
+  wipsync reads it and never writes it, so it can be shipped ready made, and anything left out has
+  a default. Colours are in `theme.toml` beside it.
+- **Database**: `~/.local/share/wipsync/wipsync.db` (`$XDG_DATA_HOME`), SQLite through
+  `modernc.org/sqlite` (pure Go, so the release stays without cgo), in WAL mode so that the
+  service, the TUI and the CLI can write at once. It holds everything wipsync writes: the client
+  name, the repository and where its password comes from (`init`), the roots and the folders with
+  their ignore rules (`add`, `pull`), and per folder the snapshot it is based on, the master it
+  last saw, its fingerprint and whether it was pulled since its last snapshot. A pull that adds a
+  folder records it and its state in one transaction. Data, not state: losing it loses the folder
+  list.
+- **Password**: in a file of its own, `~/.local/share/wipsync/password` (mode 600), written by
+  `init`; the database holds its path, or the command that prints it, handed to restic as is. Not
+  in the database, so that copying or opening the database for a look does not hand it out.
+- **Locks**: `~/.local/state/wipsync/`, one `flock` file per folder, outside the folder, where a
+  pull would overwrite it. Not in the database: the kernel lets a `flock` go however the process
+  ends.
+- **Moving from config.toml**: when the database does not exist and `config.toml` has a
+  repository or folders, the first command imports them and the per-folder files under
+  `~/.local/state/wipsync/folders/`, in one transaction. A password file that `init` kept beside
+  the config moves beside the database; one elsewhere stays where it is. Once the import is
+  saved, the old password file and the per-folder files are removed, all but the locks.
+  `config.toml` is not changed: while it still has those keys, every run warns that they are
+  ignored and can be removed.
 - **Tray**: `wipsync watch` shows an icon in the desktop's tray (StatusNotifierItem over D-Bus,
   `fyne.io/systray`), so any bar with a tray shows it, not only waybar. One symbol, a W whose tips
   run on into two arrows round a circle, coloured by state; when several apply, the first wins: red server unreachable, yellow snapshotting, purple

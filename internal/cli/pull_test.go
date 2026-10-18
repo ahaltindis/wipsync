@@ -7,21 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahaltindis/wipsync/internal/state"
+	"github.com/ahaltindis/wipsync/internal/db"
 )
 
 // secondClient returns another client of the same repository.
 func (e *env) secondClient(name string) *env {
 	e.t.Helper()
-	first := e.config()
+	first := e.data()
 	b := newEnv(e.t)
-	c := b.config()
-	c.Client = name
-	c.Repository = first.Repository
-	c.PasswordFile = first.PasswordFilePath()
-	if err := c.Save(b.cfg); err != nil {
-		e.t.Fatal(err)
-	}
+	b.set(func(s *db.Settings) {
+		s.Client = name
+		s.Repository = first.Repository
+		s.PasswordFile = first.PasswordFile
+	})
 	return b
 }
 
@@ -85,15 +83,15 @@ func TestPullOnNewClient(t *testing.T) {
 	}
 
 	// The client now knows the root and the folder, with the same ignore rules.
-	c := b.config()
+	c := b.data()
 	if c.Roots["Projects"] != rootB || len(c.Folders) != 1 || c.Folders[0].String() != name {
 		t.Errorf("config = %+v", c)
 	}
-	if strings.Join(c.Folders[0].Ignore, " ") != strings.Join(a.config().Folders[0].Ignore, " ") {
+	if strings.Join(a.data().Folders[0].Ignore, " ") != strings.Join(a.data().Folders[0].Ignore, " ") {
 		t.Errorf("ignore rules = %v", c.Folders[0].Ignore)
 	}
 	pulled := a.snapshots(repo)[0].ID
-	store, _ := state.Default()
+	store := currentDB(t)
 	if base, _ := store.Base("Projects", "Freelance/app"); base != pulled {
 		t.Errorf("base = %q, want %q", base, pulled)
 	}
@@ -159,7 +157,7 @@ func TestPullFromClient(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `no snapshots from client "nobody"`) {
 		t.Errorf("err = %v", err)
 	}
-	if len(b.config().Folders) != 0 {
+	if len(b.data().Folders) != 0 {
 		t.Error("a failed pull added the folder")
 	}
 
@@ -168,10 +166,10 @@ func TestPullFromClient(t *testing.T) {
 	if got := b.read("code/app/a.txt"); got != "two!\n" {
 		t.Errorf("a.txt = %q", got)
 	}
-	if got := b.config().Roots["Projects"]; got != filepath.Join(b.home, "code") {
+	if got := b.data().Roots["Projects"]; got != filepath.Join(b.home, "code") {
 		t.Errorf("root = %q", got)
 	}
-	store, _ := state.Default()
+	store := currentDB(t)
 	if m, _ := store.Master("Projects", "app"); m != "" {
 		t.Errorf("recorded master = %q after pulling a client's snapshot", m)
 	}
@@ -216,8 +214,8 @@ func TestPullRefusals(t *testing.T) {
 	if got := b.read("Projects/app/mine.txt"); got != "precious\n" {
 		t.Errorf("mine.txt = %q", got)
 	}
-	if len(b.config().Folders) != 0 || len(b.config().Roots) != 0 {
-		t.Errorf("a refused pull changed the config: %+v", b.config())
+	if len(b.data().Folders) != 0 || len(b.data().Roots) != 0 {
+		t.Errorf("a refused pull changed the config: %+v", b.data())
 	}
 
 	// Once the root is known, a second folder under it is not asked about.
@@ -260,7 +258,7 @@ func TestList(t *testing.T) {
 	check := func(e *env, want string) {
 		t.Helper()
 		if got := e.must("", "list"); got != want {
-			t.Errorf("list as %s:\n%s\nwant:\n%s", e.config().Client, got, want)
+			t.Errorf("list as %s:\n%s\nwant:\n%s", e.data().Client, got, want)
 		}
 	}
 	snaps := a.snapshots(repo)
@@ -329,8 +327,7 @@ func (e *env) exists(rel string) bool {
 func (e *env) base(root, path string) string {
 	e.t.Helper()
 	e.use()
-	store, _ := state.Default()
-	id, err := store.Base(root, path)
+	id, err := e.db().Base(root, path)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -547,9 +544,8 @@ func TestPullAdoptsIgnoreRules(t *testing.T) {
 
 	// client-a starts ignoring dist, which it also has.
 	a.use()
-	c := a.config()
-	c.Folders[0].Ignore = append(c.Folders[0].Ignore, "dist")
-	if err := c.Save(a.cfg); err != nil {
+	f := a.data().Folders[0]
+	if err := a.db().SetIgnore(f, append(f.Ignore, "dist")); err != nil {
 		t.Fatal(err)
 	}
 	a.write("Projects/app/dist/out.bin", "a's build\n")
@@ -561,7 +557,7 @@ func TestPullAdoptsIgnoreRules(t *testing.T) {
 	if !strings.Contains(out, "its ignore rules are now ") || !strings.Contains(out, "dist") {
 		t.Errorf("unexpected output: %s", out)
 	}
-	if got := b.config().Folders[0].Ignore; strings.Join(got, " ") != strings.Join(c.Folders[0].Ignore, " ") {
+	if got := b.data().Folders[0].Ignore; strings.Join(got, " ") != strings.Join(a.data().Folders[0].Ignore, " ") {
 		t.Errorf("ignore rules = %v", got)
 	}
 	if b.exists("Projects/app/dist") {

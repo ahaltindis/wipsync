@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ahaltindis/wipsync/internal/app"
-	"github.com/ahaltindis/wipsync/internal/config"
+	"github.com/ahaltindis/wipsync/internal/db"
 )
 
 func addCmd() *cobra.Command {
@@ -58,16 +58,16 @@ client maps it to its own location.`,
 // resolveRoot decides which parent of dir is its root, and what it is
 // called, asking when that cannot be told.
 func resolveRoot(p *prompter, a *app.App, dir, rootFlag, nameFlag string) (name, rootDir string, err error) {
-	cfg := a.Config
+	data := a.Data
 	if rootFlag != "" {
 		if rootDir, err = filepath.Abs(rootFlag); err != nil {
 			return "", "", err
 		}
-		if _, ok := config.Within(rootDir, dir); !ok {
+		if _, ok := db.Within(rootDir, dir); !ok {
 			return "", "", fmt.Errorf("%s is not inside %s", dir, rootDir)
 		}
-	} else if name, ok := cfg.RootAbove(dir); ok {
-		return name, cfg.Roots[name], nil
+	} else if name, ok := data.RootAbove(dir); ok {
+		return name, data.Roots[name], nil
 	} else {
 		candidates := app.RootCandidates(dir)
 		if len(candidates) > 1 && !p.interactive() {
@@ -78,7 +78,7 @@ func resolveRoot(p *prompter, a *app.App, dir, rootFlag, nameFlag string) (name,
 		}
 	}
 
-	if name, ok := cfg.RootAt(rootDir); ok {
+	if name, ok := data.RootAt(rootDir); ok {
 		return name, rootDir, nil
 	}
 	name = nameFlag

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/master"
-	"github.com/ahaltindis/wipsync/internal/state"
 )
 
 func TestPush(t *testing.T) {
@@ -25,7 +25,7 @@ func TestPush(t *testing.T) {
 		return out
 	}
 	must("add", dir)
-	store, _ := state.Default()
+	store := currentDB(t)
 	ctx := context.Background()
 	pointers, err := master.Open(repo)
 	if err != nil {
@@ -138,11 +138,7 @@ func TestPushUnsupportedRepository(t *testing.T) {
 	if out, err := e.run("", "add", dir); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	c := e.config()
-	c.Repository = "rest:https://example.invalid/repo"
-	if err := c.Save(e.cfg); err != nil {
-		t.Fatal(err)
-	}
+	e.set(func(s *db.Settings) { s.Repository = "rest:https://example.invalid/repo" })
 	_, err := e.run("", "push", dir)
 	if err == nil || !strings.Contains(err.Error(), "not rest:") {
 		t.Errorf("err = %v", err)

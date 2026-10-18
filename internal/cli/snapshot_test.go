@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ahaltindis/wipsync/internal/db"
 	"github.com/ahaltindis/wipsync/internal/state"
 )
 
@@ -26,13 +27,11 @@ func (e *env) repo() string {
 	}
 	e.restic(repo, pass, "init")
 
-	c := e.config()
-	c.Client = "client-a"
-	c.Repository = repo
-	c.PasswordFile = pass
-	if err := c.Save(e.cfg); err != nil {
-		e.t.Fatal(err)
-	}
+	e.set(func(s *db.Settings) {
+		s.Client = "client-a"
+		s.Repository = repo
+		s.PasswordFile = pass
+	})
 	return repo
 }
 
@@ -103,7 +102,7 @@ func TestSnapshot(t *testing.T) {
 	if len(first.Excludes) == 0 {
 		t.Error("the ignore rules were not passed to restic")
 	}
-	store, _ := state.Default()
+	store := currentDB(t)
 	if base, _ := store.Base("Projects", "Freelance/app"); base != first.ID {
 		t.Errorf("base = %q, want %q", base, first.ID)
 	}
@@ -182,19 +181,12 @@ func TestSnapshotUnchanged(t *testing.T) {
 	}
 
 	// The unchanged case does not need the repository at all.
-	c := e.config()
-	working := c.Repository
-	c.Repository = filepath.Join(e.home, "no-such-repository")
-	if err := c.Save(e.cfg); err != nil {
-		t.Fatal(err)
-	}
+	working := e.data().Repository
+	e.set(func(s *db.Settings) { s.Repository = filepath.Join(e.home, "no-such-repository") })
 	if out := e.must("", "snapshot", dir); out != "Projects/app: no changes\n" {
 		t.Errorf("without a repository: %s", out)
 	}
-	c.Repository = working
-	if err := c.Save(e.cfg); err != nil {
-		t.Fatal(err)
-	}
+	e.set(func(s *db.Settings) { s.Repository = working })
 
 	// Real changes are still seen: a staged file, then a commit.
 	e.write("Projects/app/b.txt", "two\n")
@@ -227,17 +219,13 @@ func TestSnapshotErrors(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, err = e.run("", "snapshot", dir)
-	if err == nil || !strings.Contains(err.Error(), "repository is not set in "+e.cfg) {
+	if err == nil || !strings.Contains(err.Error(), "repository is not set") {
 		t.Errorf("no repository: err = %v", err)
 	}
 
-	c := e.config()
-	c.Repository = "/nowhere"
-	if err := c.Save(e.cfg); err != nil {
-		t.Fatal(err)
-	}
+	e.set(func(s *db.Settings) { s.Repository = "/nowhere" })
 	_, err = e.run("", "snapshot", dir)
-	if err == nil || !strings.Contains(err.Error(), "neither password_file nor password_command") {
+	if err == nil || !strings.Contains(err.Error(), "no repository password is set") {
 		t.Errorf("no password: err = %v", err)
 	}
 }
@@ -246,16 +234,16 @@ func TestDoctor(t *testing.T) {
 	needRestic(t) // a missing restic would be one more problem in every count below
 	e := newEnv(t)
 
-	// Nothing set up.
+	// Nothing set up. Without a config file the defaults apply.
 	out, err := e.run("", "doctor")
 	if err == nil {
-		t.Errorf("doctor passed without a config:\n%s", out)
+		t.Errorf("doctor passed without a setup:\n%s", out)
 	}
-	if !strings.Contains(out, "FAIL  config: "+e.cfg+" does not exist") {
+	if !strings.Contains(out, "ok    config: "+e.cfg+" does not exist, so the defaults apply") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 
-	// Config without repository or password.
+	// A folder, but no repository or password.
 	dir := e.mkdir("Projects/app")
 	if out, err := e.run("", "add", dir); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -266,7 +254,7 @@ func TestDoctor(t *testing.T) {
 	}
 	for _, want := range []string{
 		"FAIL  repository: repository is not set",
-		"FAIL  password: neither",
+		"FAIL  password: no repository password is set",
 		"skip  repository access",
 		"ok    folder Projects/app: " + dir,
 	} {
@@ -329,11 +317,7 @@ func TestLog(t *testing.T) {
 	e.write("Projects/app/a.txt", "two!\n")
 	snap(app)
 	snap(other)
-	c := e.config()
-	c.Client = "client-b"
-	if err := c.Save(e.cfg); err != nil {
-		t.Fatal(err)
-	}
+	e.set(func(s *db.Settings) { s.Client = "client-b" })
 	e.write("Projects/app/a.txt", "three\n")
 	snap(app)
 
