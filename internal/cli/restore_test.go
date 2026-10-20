@@ -184,3 +184,50 @@ func TestFindSnapshotAmbiguous(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// When the snapshot a folder is based on was deleted, nothing can be saved,
+// so neither a snapshot nor a restore that saves first works. A restore
+// without saving gets the folder going again, at the cost of its changes.
+func TestRestoreNoSaveAfterBaseDeleted(t *testing.T) {
+	e := newEnv(t)
+	repo := e.repo()
+	e.write("Projects/app/a.txt", "one\n")
+	dir := filepath.Join(e.home, "Projects/app")
+	e.must("", "add", dir)
+	e.must("", "snapshot", dir)
+	first := e.base("Projects", "app")
+	e.write("Projects/app/a.txt", "two\n")
+	e.must("", "snapshot", dir)
+	deleted := e.base("Projects", "app")
+	e.restic(repo, filepath.Join(filepath.Dir(e.cfg), "pass"), "forget", deleted)
+	e.write("Projects/app/a.txt", "three\n")
+
+	for _, args := range [][]string{{"snapshot", dir}, {"restore", first[:8], dir}} {
+		if _, err := e.run("", args...); err == nil || !strings.Contains(err.Error(), deleted[:8]) {
+			t.Errorf("%v without the base: err = %v", args, err)
+		}
+	}
+
+	out := e.must("", "restore", "--no-save", first[:8], dir)
+	if strings.Contains(out, "saved its current state") || strings.Contains(out, "to undo") ||
+		!strings.Contains(out, "restored Projects/app to "+first[:8]) {
+		t.Errorf("unexpected output:\n%s", out)
+	}
+	if got := e.read("Projects/app/a.txt"); got != "one\n" {
+		t.Errorf("a.txt = %q", got)
+	}
+	if got := e.base("Projects", "app"); got != first {
+		t.Errorf("base = %s, want %s", got, first)
+	}
+	e.write("Projects/app/a.txt", "four\n")
+	if out := e.must("", "snapshot", dir); strings.Contains(out, "no changes") {
+		t.Errorf("snapshot after the restore: %s", out)
+	}
+
+	// Without saving, a restore to the snapshot the folder is on still
+	// drops what changed since.
+	e.must("", "restore", "--no-save", first[:8], dir)
+	if got := e.read("Projects/app/a.txt"); got != "one\n" {
+		t.Errorf("a.txt = %q", got)
+	}
+}

@@ -265,8 +265,8 @@ func record(w db.Writer, f db.Folder, target restic.Snapshot, isMaster bool, pri
 }
 
 // apply makes the folder match the target snapshot and records that. base
-// is the snapshot holding the folder's state from before, for the message
-// if it fails halfway. It returns the folder's ignore rules and whether
+// is the snapshot holding the folder's state from before, if there is one,
+// for the message if it fails halfway. It returns the folder's ignore rules and whether
 // they changed.
 func (a *App) apply(ctx context.Context, f db.Folder, target restic.Snapshot, isMaster bool, base string) ([]string, bool, error) {
 	client, err := a.Client()
@@ -283,6 +283,9 @@ func (a *App) apply(ctx context.Context, f db.Folder, target restic.Snapshot, is
 		}
 	}
 	if _, err := client.Restore(ctx, restic.RestoreOptions{ID: target.ID, Dir: dir, Excludes: excludes}); err != nil {
+		if base == "" {
+			return nil, false, fmt.Errorf("%w. %s may be partly updated", err, dir)
+		}
 		return nil, false, fmt.Errorf("%w. %s may be partly updated; its state from before is snapshot %s", err, dir, base[:8])
 	}
 

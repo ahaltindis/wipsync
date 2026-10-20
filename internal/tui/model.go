@@ -23,7 +23,7 @@ type Backend interface {
 	Pull(ctx context.Context, f db.Folder, from string) (app.PullResult, error)
 	FindTarget(ctx context.Context, f db.Folder, from string) (app.Target, error)
 	Fetch(ctx context.Context, f db.Folder, rootDir string, t app.Target) (app.PullResult, error)
-	Restore(ctx context.Context, f db.Folder, name string) (app.RestoreResult, error)
+	Restore(ctx context.Context, f db.Folder, name string, save bool) (app.RestoreResult, error)
 	Delete(ctx context.Context, f db.Folder, id string) error
 	PullAll(ctx context.Context, scope app.Scope) (app.AllResult, error)
 	PushAll(ctx context.Context, scope app.Scope) (app.AllResult, error)

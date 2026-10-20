@@ -361,7 +361,8 @@ func (m Model) chooseRestore() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// askRestore confirms restoring the folder to the snapshot selected in the log.
+// askRestore asks how to restore the folder to the snapshot selected in
+// the log, saving its current state first or not, and confirms it.
 func (m Model) askRestore() (tea.Model, tea.Cmd) {
 	f := m.selected().folder
 	if f == nil || m.logSel >= len(f.Snapshots) {
@@ -374,27 +375,47 @@ func (m Model) askRestore() (tea.Model, tea.Cmd) {
 	s := f.Snapshots[m.logSel]
 	name := f.Folder.String()
 	m.dialog = &dialog{
-		title:   "Restore " + name + "?",
-		text:    "Makes " + f.Dir + " match " + app.Describe(s) + ", whatever state it is in. Its current state is saved as a snapshot first.",
-		confirm: true,
-		done: func(m Model, _ string) (tea.Model, tea.Cmd) {
-			return m.start("restoring "+name, "restore "+name, func(ctx context.Context) (string, error) {
-				res, err := m.back.Restore(ctx, f.Folder, s.ID)
-				if err != nil {
-					return "", err
-				}
-				if res.Already {
-					return fmt.Sprintf("%s: already at %s", name, app.Brief(res.Target)), nil
-				}
-				note := fmt.Sprintf("restored %s to %s", name, res.Target.ID[:8])
-				if res.Undo != "" {
-					note += "; its state before is snapshot " + res.Undo[:8]
-				}
-				return note, nil
-			})
+		title: "Restore " + name + " to " + s.ID[:8],
+		menu:  []option{{"s", "save its current state first"}, {"H", "hard restore: lose its current state"}},
+		done: func(m Model, key string) (tea.Model, tea.Cmd) {
+			save := key == "s"
+			text := "Makes " + f.Dir + " match " + app.Describe(s) + ", whatever state it is in. Its current state is saved as a snapshot first."
+			if !save {
+				text = "Makes " + f.Dir + " match " + app.Describe(s) + ", whatever state it is in. Its current state is not saved: what is not in a snapshot is lost."
+			}
+			m.dialog = &dialog{
+				title:   "Restore " + name + "?",
+				text:    text,
+				confirm: true,
+				done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+					return m.start("restoring "+name, "restore "+name, func(ctx context.Context) (string, error) {
+						return restore(ctx, m.back, f.Folder, s.ID, save)
+					})
+				},
+			}
+			return m, nil
 		},
 	}
 	return m, nil
+}
+
+// restore makes a folder match a snapshot, and says how it went.
+func restore(ctx context.Context, back Backend, f db.Folder, id string, save bool) (string, error) {
+	res, err := back.Restore(ctx, f, id, save)
+	if err != nil {
+		return "", err
+	}
+	if res.Already {
+		return fmt.Sprintf("%s: already at %s", f, app.Brief(res.Target)), nil
+	}
+	note := fmt.Sprintf("restored %s to %s", f, res.Target.ID[:8])
+	switch {
+	case !save:
+		note += "; its state before was not saved"
+	case res.Undo != "":
+		note += "; its state before is snapshot " + res.Undo[:8]
+	}
+	return note, nil
 }
 
 // askDelete confirms deleting the snapshot selected in the log, or says

@@ -90,7 +90,11 @@ func (f *fake) Fetch(_ context.Context, fo db.Folder, rootDir string, t app.Targ
 	return app.PullResult{Outcome: app.Pulled, Target: t.Snapshot, Dir: rootDir + "/" + fo.Path, New: true}, err
 }
 
-func (f *fake) Restore(_ context.Context, fo db.Folder, name string) (app.RestoreResult, error) {
+func (f *fake) Restore(_ context.Context, fo db.Folder, name string, save bool) (app.RestoreResult, error) {
+	if !save {
+		err := f.did("hard restore " + fo.String() + " to " + name[:8])
+		return app.RestoreResult{Target: snap("b1", "", "desktop", 90)}, err
+	}
 	err := f.did("restore " + fo.String() + " to " + name[:8])
 	return app.RestoreResult{Target: snap("b1", "", "desktop", 90), Undo: strings.Repeat("7", 64)}, err
 }
@@ -766,6 +770,10 @@ func TestRestore(t *testing.T) {
 		t.Errorf("r did not move into the log: focus = %d, bottom = %q", m.focus, bottom(m))
 	}
 	m = keys(t, m, "j", "r") // the older one
+	if text := asks(m); !strings.Contains(text, "Restore "+name+" to b1b1b1b1") {
+		t.Errorf("r did not ask how to restore: %s", text)
+	}
+	m = keys(t, m, "s")
 	screen := m.View()
 	t.Logf("confirming a restore:\n%s", screen)
 	if !strings.Contains(screen, "Restore "+name+"?") || !strings.Contains(asks(m), "match b1b1b1b1, the snapshot from") ||
@@ -777,6 +785,20 @@ func TestRestore(t *testing.T) {
 		t.Errorf("calls = %v, want %v", back.calls, want)
 	}
 	if got := bottom(m); got != "restored "+name+" to b1b1b1b1; its state before is snapshot 77777777" {
+		t.Errorf("bottom line = %q", got)
+	}
+
+	// H restores without saving, and says so.
+	back.calls = nil
+	m = keys(t, m, "r", "H")
+	if text := asks(m); !strings.Contains(text, "is not saved: what is not in a snapshot is lost") {
+		t.Errorf("unexpected confirmation: %s", text)
+	}
+	m = run(t, m, "y")
+	if want := []string{"hard restore " + name + " to b1b1b1b1"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if got := bottom(m); got != "restored "+name+" to b1b1b1b1; its state before was not saved" {
 		t.Errorf("bottom line = %q", got)
 	}
 

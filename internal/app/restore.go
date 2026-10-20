@@ -24,9 +24,10 @@ type RestoreResult struct {
 }
 
 // Restore makes the folder match one of its snapshots, whatever state it
-// is in, after saving that state as a snapshot. The snapshot is named by
-// the start of its ID, or is "master".
-func (a *App) Restore(ctx context.Context, f db.Folder, name string) (RestoreResult, error) {
+// is in. With save, that state is saved as a snapshot first; without, it is
+// lost, which is the way out when it cannot be saved. The snapshot is named
+// by the start of its ID, or is "master".
+func (a *App) Restore(ctx context.Context, f db.Folder, name string, save bool) (RestoreResult, error) {
 	var res RestoreResult
 	unlock, err := a.lock(f)
 	if err != nil {
@@ -50,17 +51,19 @@ func (a *App) Restore(ctx context.Context, f db.Folder, name string) (RestoreRes
 		return res, err
 	}
 
-	saved, err := a.snapshot(ctx, f)
-	if err != nil {
-		return res, err
-	}
-	res.Saved = saved.SnapshotID
-	if res.Undo, err = a.DB.Base(f.Root, f.Path); err != nil {
-		return res, err
-	}
-	if res.Undo == res.Target.ID {
-		res.Already = true
-		return res, nil
+	if save {
+		saved, err := a.snapshot(ctx, f)
+		if err != nil {
+			return res, err
+		}
+		res.Saved = saved.SnapshotID
+		if res.Undo, err = a.DB.Base(f.Root, f.Path); err != nil {
+			return res, err
+		}
+		if res.Undo == res.Target.ID {
+			res.Already = true
+			return res, nil
+		}
 	}
 	res.Ignore, res.IgnoreChanged, err = a.apply(ctx, f, res.Target, res.Target.ID == masterID, res.Undo)
 	return res, err

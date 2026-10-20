@@ -10,7 +10,8 @@ import (
 )
 
 func restoreCmd() *cobra.Command {
-	return &cobra.Command{
+	var noSave bool
+	cmd := &cobra.Command{
 		Use:   "restore <snapshot> [folder]",
 		Short: "Make a folder match one of its snapshots",
 		Long: `Make a folder match one of its snapshots, whatever state it is in.
@@ -21,7 +22,11 @@ another is given.
 
 Restore first saves the folder's current state as a snapshot and prints its
 ID, so a restore can itself be undone. Use it to undo a pull, or to give up
-local changes and take master after a pull was refused.`,
+local changes and take master after a pull was refused.
+
+With --no-save the current state is not saved, and is lost: the way out when
+it cannot be saved, for instance when the snapshot the folder is based on was
+deleted.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := open(cmd)
@@ -33,7 +38,7 @@ local changes and take master after a pull was refused.`,
 				return err
 			}
 			out := cmd.OutOrStdout()
-			res, err := a.Restore(cmd.Context(), f, args[0])
+			res, err := a.Restore(cmd.Context(), f, args[0], !noSave)
 			if res.Saved != "" {
 				fmt.Fprintf(out, "%s: saved its current state as snapshot %s\n", f, res.Saved[:8])
 			}
@@ -54,4 +59,6 @@ local changes and take master after a pull was refused.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save the folder's current state first; it is lost")
+	return cmd
 }
