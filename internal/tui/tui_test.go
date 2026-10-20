@@ -95,6 +95,10 @@ func (f *fake) Restore(_ context.Context, fo db.Folder, name string) (app.Restor
 	return app.RestoreResult{Target: snap("b1", "", "desktop", 90), Undo: strings.Repeat("7", 64)}, err
 }
 
+func (f *fake) Delete(_ context.Context, fo db.Folder, id string) error {
+	return f.did("delete " + fo.String() + " " + id[:8])
+}
+
 // scope says what a pull or push of many folders was given.
 func scope(s app.Scope) string {
 	var parts []string
@@ -402,7 +406,7 @@ func TestHints(t *testing.T) {
 		{"a root", []string{"g"}, "Root · Projects",
 			"P push all  p pull all  o open here  O open in window  R refresh  ? help  q quit  " + move + "  tab browse  space mark  / search"},
 		{"a snapshot in the log", []string{"j", "l"}, "Log · Projects/aha/archype · b1b1b1b1",
-			"r restore this snapshot  o open here  O open in window  R refresh  ? help  q quit  " + move + "  h folders  tab browse"},
+			"r restore this snapshot  d delete this snapshot  o open here  O open in window  R refresh  ? help  q quit  " + move + "  h folders  tab browse"},
 	}
 	for _, tc := range cases {
 		m = keys(t, m, tc.typed...)
@@ -781,6 +785,41 @@ func TestRestore(t *testing.T) {
 	m = keys(t, m, "h", "g", "j", "j", "l", "r") // aha/website
 	if m.dialog != nil || len(back.calls) != 0 || !strings.Contains(bottom(m), "not on this client") {
 		t.Errorf("restore was offered for a folder that is not here: %q", bottom(m))
+	}
+}
+
+func TestDelete(t *testing.T) {
+	m, back := started(t, 100, 20)
+	const name = "Projects/Freelance/kadir/boxing-machine"
+	m = keys(t, m, "j", "j", "j", "l") // its log: b2 is master, b1 the base
+
+	// Master, and the snapshot this client is based on, are kept.
+	m = keys(t, m, "d")
+	if !strings.Contains(asks(m), "It is kept: it is master.") {
+		t.Errorf("deleting master was not refused: %s", asks(m))
+	}
+	m = keys(t, m, "esc", "j", "d")
+	if !strings.Contains(asks(m), "this client's folder is based on it") {
+		t.Errorf("deleting the base was not refused: %s", asks(m))
+	}
+	if len(back.calls) != 0 {
+		t.Errorf("calls = %v, want none", back.calls)
+	}
+
+	// Work another client gave up, on b1, is neither.
+	f := &back.world.Folders[3]
+	f.Snapshots = append([]restic.Snapshot{snap("c3", f.Base, "desktop", 5)}, f.Snapshots...)
+	m = run(t, keys(t, m, "esc"), "R")
+	m = keys(t, m, "g", "d")
+	if !strings.Contains(asks(m), "Delete a snapshot of "+name+"?") || !strings.Contains(asks(m), "Removes c3c3c3c3, the snapshot from") {
+		t.Fatalf("unexpected confirmation: %s", asks(m))
+	}
+	m = run(t, m, "y")
+	if want := []string{"delete " + name + " c3c3c3c3"}; !slices.Equal(back.calls, want) {
+		t.Errorf("calls = %v, want %v", back.calls, want)
+	}
+	if got := bottom(m); got != "deleted c3c3c3c3 of "+name {
+		t.Errorf("bottom line = %q", got)
 	}
 }
 

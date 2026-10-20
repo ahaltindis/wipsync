@@ -235,6 +235,29 @@ func TestRestore(t *testing.T) {
 	}
 }
 
+func TestForget(t *testing.T) {
+	c := newRepo(t)
+	ctx := context.Background()
+	src := t.TempDir()
+	write(t, filepath.Join(src, "a.txt"), "one")
+	first, err := c.Backup(ctx, BackupOptions{Dir: src, Host: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(src, "a.txt"), "two")
+	second, err := c.Backup(ctx, BackupOptions{Dir: src, Host: "h", Parent: first.SnapshotID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Forget(ctx, second.SnapshotID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := c.Snapshots(ctx, nil)
+	if err != nil || len(list) != 1 || list[0].ID != first.SnapshotID {
+		t.Errorf("after forgetting the second: %+v, %v", list, err)
+	}
+}
+
 // A client kept away from the terminal runs restic in a session of its own,
 // and works as before.
 func TestNoTerminal(t *testing.T) {

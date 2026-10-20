@@ -49,6 +49,7 @@ func (m Model) hints() (left, right []hintGroup) {
 			act("P", "push"),
 			act("p", "pull"),
 			act("r", "restore"),
+			act("d", "delete"),
 			act("a", "add"),
 			act("o", "open here"),
 			act("O", "open in window"),

@@ -36,6 +36,25 @@ func TestDescends(t *testing.T) {
 	}
 }
 
+func TestCheckDelete(t *testing.T) {
+	// a <- b <- c, and a <- x: master is b, this client is based on x.
+	snaps := []restic.Snapshot{{ID: "a"}, {ID: "b", Parent: "a"}, {ID: "c", Parent: "b"}, {ID: "x", Parent: "a"}}
+	for id, want := range map[string]string{
+		"a": "another snapshot is based on it",
+		"b": "it is master",
+		"x": "this client's folder is based on it",
+		"c": "",
+	} {
+		got := ""
+		if err := CheckDelete(snaps, id, "x", "b"); err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Errorf("CheckDelete(%s) = %q, want %q", id, got, want)
+		}
+	}
+}
+
 func TestAge(t *testing.T) {
 	cases := map[string]string{
 		"20s":   "just now",

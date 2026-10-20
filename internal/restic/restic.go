@@ -293,6 +293,13 @@ func (c *Client) Find(ctx context.Context, id string) (Snapshot, error) {
 	return Snapshot{}, fmt.Errorf("restic snapshots: %d snapshots match %s", len(list), id)
 }
 
+// Forget removes the snapshot with the given ID from the repository. The
+// data only it used stays until a prune.
+func (c *Client) Forget(ctx context.Context, id string) error {
+	_, err := c.run(ctx, "", "forget", id)
+	return err
+}
+
 type RestoreOptions struct {
 	ID       string
 	Dir      string   // the folder to make match the snapshot

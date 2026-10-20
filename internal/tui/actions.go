@@ -52,7 +52,7 @@ func (m Model) selectionActions() []action {
 	}
 	switch {
 	case m.focus == log:
-		return []action{{"r", "restore this snapshot", Model.askRestore}}
+		return []action{{"r", "restore this snapshot", Model.askRestore}, {"d", "delete this snapshot", Model.askDelete}}
 	case r.folder == nil && r.root != "":
 		return []action{{"P", "push all", Model.askPushAll}, {"p", "pull all", Model.askPullAll}}
 	case r.folder == nil:
@@ -391,6 +391,35 @@ func (m Model) askRestore() (tea.Model, tea.Cmd) {
 					note += "; its state before is snapshot " + res.Undo[:8]
 				}
 				return note, nil
+			})
+		},
+	}
+	return m, nil
+}
+
+// askDelete confirms deleting the snapshot selected in the log, or says
+// why it is kept.
+func (m Model) askDelete() (tea.Model, tea.Cmd) {
+	f := m.selected().folder
+	if f == nil || m.logSel >= len(f.Snapshots) {
+		return m, nil
+	}
+	s := f.Snapshots[m.logSel]
+	name := f.Folder.String()
+	if err := app.CheckDelete(f.Snapshots, s.ID, f.Base, f.Master); err != nil {
+		m.dialog = message("Cannot delete "+s.ID[:8], "It is kept: "+err.Error()+".")
+		return m, nil
+	}
+	m.dialog = &dialog{
+		title:   "Delete a snapshot of " + name + "?",
+		text:    "Removes " + app.Describe(s) + " from the repository, for every client. Its data stays until the repository is pruned.",
+		confirm: true,
+		done: func(m Model, _ string) (tea.Model, tea.Cmd) {
+			return m.start("deleting "+s.ID[:8], "delete "+s.ID[:8], func(ctx context.Context) (string, error) {
+				if err := m.back.Delete(ctx, f.Folder, s.ID); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("deleted %s of %s", s.ID[:8], name), nil
 			})
 		},
 	}
