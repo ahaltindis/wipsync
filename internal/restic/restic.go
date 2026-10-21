@@ -295,7 +295,15 @@ func (c *Client) Find(ctx context.Context, id string) (Snapshot, error) {
 
 // Forget removes the snapshot with the given ID from the repository. The
 // data only it used stays until a prune.
+//
+// Forget needs restic's exclusive lock, which any other lock refuses, even
+// a stale one: restic never lets a lock expire. A restic that was killed
+// leaves its lock behind, so the stale ones are removed first. A live lock
+// is refreshed by its restic and is not stale, so it still refuses.
 func (c *Client) Forget(ctx context.Context, id string) error {
+	if _, err := c.run(ctx, "", "unlock"); err != nil {
+		return err
+	}
 	_, err := c.run(ctx, "", "forget", id)
 	return err
 }

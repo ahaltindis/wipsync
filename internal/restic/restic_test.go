@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseVersion(t *testing.T) {
@@ -255,6 +256,45 @@ func TestForget(t *testing.T) {
 	list, err := c.Snapshots(ctx, nil)
 	if err != nil || len(list) != 1 || list[0].ID != first.SnapshotID {
 		t.Errorf("after forgetting the second: %+v, %v", list, err)
+	}
+}
+
+// A restic that was killed leaves its lock in the repository; Forget is not
+// refused for it.
+func TestForgetStaleLock(t *testing.T) {
+	c := newRepo(t)
+	ctx := context.Background()
+	src := t.TempDir()
+	write(t, filepath.Join(src, "a.txt"), "one")
+	b, err := c.Backup(ctx, BackupOptions{Dir: src, Host: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A backup from a stdin that stays open holds its lock until killed.
+	cmd := exec.Command(binary, "backup", "--stdin", "--host", "h")
+	cmd.Env = append(os.Environ(), "RESTIC_REPOSITORY="+c.Repository, "RESTIC_PASSWORD_FILE="+c.PasswordFile)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	locks := filepath.Join(c.Repository, "locks")
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		if entries, _ := os.ReadDir(locks); len(entries) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("restic backup took no lock")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cmd.Process.Kill()
+	cmd.Wait()
+	if err := c.Forget(ctx, b.SnapshotID); err != nil {
+		t.Fatal(err)
 	}
 }
 
