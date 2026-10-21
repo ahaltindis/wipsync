@@ -1,6 +1,6 @@
 # Maintainer: Ahmet Altindis
 pkgname=wipsync-bin
-pkgver=0.5.1
+pkgver=0.5.2
 pkgrel=1
 pkgdesc="Sync work-in-progress folders between machines, through restic and ssh"
 arch=(x86_64)
