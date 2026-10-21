@@ -15,8 +15,10 @@ var version = "dev"
 
 func main() {
 	cli.Version = version
-	// SIGTERM is how a service is stopped.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// SIGTERM is how a service is stopped, and SIGHUP is sent when the
+	// terminal goes away. Caught, they end the command cleanly: restic is
+	// interrupted and removes its lock from the repository.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	// The first Ctrl+C ends the command cleanly. After it, stop catching the
 	// signal, so a second one ends the program at once.

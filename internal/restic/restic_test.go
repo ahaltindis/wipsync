@@ -298,6 +298,29 @@ func TestForgetStaleLock(t *testing.T) {
 	}
 }
 
+// Reads take no lock, so they work where none can be made.
+func TestReadsTakeNoLock(t *testing.T) {
+	c := newRepo(t)
+	ctx := context.Background()
+	src := t.TempDir()
+	write(t, filepath.Join(src, "a.txt"), "one")
+	b, err := c.Backup(ctx, BackupOptions{Dir: src, Host: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locks := filepath.Join(c.Repository, "locks")
+	if err := os.Chmod(locks, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locks, 0o700) })
+	if list, err := c.Snapshots(ctx, nil); err != nil || len(list) != 1 {
+		t.Errorf("Snapshots: %+v, %v", list, err)
+	}
+	if _, err := c.Find(ctx, b.SnapshotID); err != nil {
+		t.Errorf("Find: %v", err)
+	}
+}
+
 // A client kept away from the terminal runs restic in a session of its own,
 // and works as before.
 func TestNoTerminal(t *testing.T) {

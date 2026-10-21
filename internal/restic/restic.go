@@ -258,8 +258,10 @@ type Snapshot struct {
 }
 
 // Snapshots lists the snapshots that carry all the given tags, oldest first.
+// Like every read, it takes no lock: a restic killed while it reads, as when
+// the TUI is closed, would leave its lock in the repository.
 func (c *Client) Snapshots(ctx context.Context, tags []string) ([]Snapshot, error) {
-	args := []string{"snapshots", "--json"}
+	args := []string{"snapshots", "--json", "--no-lock"}
 	if len(tags) > 0 {
 		args = append(args, "--tag", strings.Join(tags, ","))
 	}
@@ -276,7 +278,7 @@ func (c *Client) Snapshots(ctx context.Context, tags []string) ([]Snapshot, erro
 
 // Find returns the snapshot with the given ID.
 func (c *Client) Find(ctx context.Context, id string) (Snapshot, error) {
-	out, err := c.run(ctx, "", "snapshots", "--json", id)
+	out, err := c.run(ctx, "", "snapshots", "--json", "--no-lock", id)
 	if err != nil {
 		return Snapshot{}, err
 	}
